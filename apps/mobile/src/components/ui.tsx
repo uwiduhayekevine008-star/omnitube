@@ -21,9 +21,15 @@ export function Avatar({ profile, size = 42 }: { profile?: Profile | null; size?
   </View>;
 }
 type ButtonProps = PressableProps & { title: string; icon?: keyof typeof Ionicons.glyphMap; variant?: "primary" | "secondary" | "quiet" | "danger"; busy?: boolean; textStyle?: TextStyle };
+const buttonVariantStyles = {
+  primary: styles.button_primary,
+  secondary: styles.button_secondary,
+  quiet: styles.button_quiet,
+  danger: styles.button_danger,
+} as const;
 export function ActionButton({ title, icon, variant = "primary", busy, disabled, textStyle, style, ...props }: ButtonProps) {
   return <Pressable accessibilityRole="button" disabled={disabled || busy} style={({ pressed }) => [
-    styles.button, styles["button_" + variant], pressed && !disabled ? styles.buttonPressed : null, typeof style === "function" ? style({ pressed, hovered: false }) : style,
+    styles.button, buttonVariantStyles[variant], pressed && !disabled ? styles.buttonPressed : null, typeof style === "function" ? style({ pressed }) : style,
   ]} {...props}>
     {busy ? <ActivityIndicator size="small" color={variant === "primary" ? "#071712" : theme.mint} /> : icon ? <Ionicons name={icon} size={17} color={variant === "primary" ? "#071712" : variant === "danger" ? theme.coral : theme.mint} /> : null}
     <Text style={[styles.buttonText, variant === "primary" ? styles.buttonTextPrimary : null, variant === "danger" ? { color: theme.coral } : null, textStyle]}>{busy ? "Please wait…" : title}</Text>
