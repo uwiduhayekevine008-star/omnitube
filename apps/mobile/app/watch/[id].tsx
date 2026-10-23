@@ -71,8 +71,10 @@ export default function WatchScreen() {
         }
         if (user && !viewRecorded.current) {
           viewRecorded.current = true;
-          const today = new Date().toISOString().slice(0, 10);
-          await supabase.from("video_views").upsert({ video_id: id, viewer_id: user.id, view_date: today, watch_seconds: 1, source: "direct" }, { onConflict: "video_id,viewer_id,view_date" });
+          const { error: watchError } = await supabase.rpc("record_video_watch", {
+            p_video_id: id, p_watch_seconds: 1, p_source: "direct"
+          });
+          if (watchError) console.warn("Watch activity could not be recorded", watchError.message);
         }
         await loadComments();
       } catch (error) {
