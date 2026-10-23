@@ -151,7 +151,7 @@ export default function WatchScreen() {
       } finally { if (active) setLoading(false); }
     })();
     return () => { active = false; player.pause(); };
-  }, [id, user?.id, player, loadComments, playbackAttempt, playbackRate]);
+  }, [id, user?.id, player, loadComments, playbackAttempt]);
 
   useEffect(() => {
     const sourceSub = player.addListener("sourceLoad", (payload) => {
