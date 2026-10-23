@@ -169,9 +169,6 @@ export default function WatchScreen() {
         index,
       })));
     });
-    const videoSub = player.addListener("availableVideoTracksChange", ({ availableVideoTracks }) => {
-      setHasAdaptiveTracks(availableVideoTracks.length > 1);
-    });
     const timeSub = player.addListener("timeUpdate", ({ currentTime: position, bufferedPosition: buffered }) => {
       setCurrentTime(position);
       setDurationSeconds(Number.isFinite(player.duration) ? player.duration : 0);
@@ -181,7 +178,6 @@ export default function WatchScreen() {
     return () => {
       sourceSub.remove();
       subtitleSub.remove();
-      videoSub.remove();
       timeSub.remove();
       rateSub.remove();
     };
