@@ -39,6 +39,24 @@ export default function CreateScreen() {
       if (!title.trim()) setTitle((result.assets[0].fileName || "").replace(/\.[^/.]+$/, "").replace(/[_-]+/g, " ").slice(0, 180));
     }
   };
+  const recordVideo = async () => {
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Camera permission needed", "Allow camera access to record a video directly into your OmniTube upload flow.");
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ["videos"],
+      videoMaxDuration: 300,
+      quality: 1,
+    });
+    if (!result.canceled && result.assets[0]) {
+      const recorded = result.assets[0];
+      setAsset(recorded);
+      if (!title.trim()) setTitle((recorded.fileName || "My OmniTube video").replace(/\.[^/.]+$/, "").replace(/[_-]+/g, " ").slice(0, 180));
+    }
+  };
+
   const pickThumbnail = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], allowsEditing: true, aspect: [16, 9], quality: 0.9 });
     if (!result.canceled && result.assets[0]) setThumbnail(result.assets[0]);
@@ -140,6 +158,13 @@ export default function CreateScreen() {
         <Text style={styles.dropDetail}>{asset ? ((asset.fileSize || 0) / (1024 * 1024)).toFixed(1) + " MB · " + (asset.duration ? Math.round(asset.duration / 1000) + " sec" : "Duration detected by player") : "MP4, WebM, MOV, MKV · up to 200 MB on mobile"}</Text>
         <View style={styles.selectMedia}><Ionicons name="folder-open-outline" size={15} color={theme.mint}/><Text style={styles.selectMediaText}>{asset ? "Replace video" : "Browse media library"}</Text></View>
       </Pressable>
+      <View style={styles.captureRow}>
+        <Pressable onPress={() => void recordVideo()} disabled={busy} style={styles.captureButton}>
+          <Ionicons name="camera-outline" size={16} color={theme.mint}/>
+          <Text style={styles.captureButtonText}>Record video</Text>
+        </Pressable>
+        <Text style={styles.captureHint}>Capture up to 5 minutes directly on your device.</Text>
+      </View>
 
       <View style={styles.form}>
         <Text style={styles.label}>CONTENT FORMAT</Text>
@@ -179,6 +204,10 @@ const styles = StyleSheet.create({
   dropDetail: { color: theme.muted, fontSize: 9, marginTop: 6, textAlign: "center" },
   selectMedia: { marginTop: 12, flexDirection: "row", gap: 7, alignItems: "center" },
   selectMediaText: { color: theme.mint, fontSize: 10, fontWeight: "900" },
+  captureRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 10 },
+  captureButton: { minHeight: 37, borderRadius: 10, borderWidth: 1, borderColor: "#63EAC83D", backgroundColor: "#63EAC80C", paddingHorizontal: 12, flexDirection: "row", alignItems: "center", gap: 7 },
+  captureButtonText: { color: theme.mint, fontSize: 10, fontWeight: "900" },
+  captureHint: { flex: 1, color: theme.subtle, fontSize: 8, lineHeight: 13 },
   form: { marginTop: 22, gap: 10 },
   label: { color: theme.muted, fontSize: 9, letterSpacing: 1.25, fontWeight: "900", marginTop: 10 },
   count: { color: theme.subtle, letterSpacing: 0, fontWeight: "700" },
