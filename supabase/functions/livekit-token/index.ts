@@ -12,7 +12,7 @@ Deno.serve(async (request: Request) => {
   if (!url || !anonKey) return respond(503, { error: "Supabase server configuration is missing" });
   if (!apiKey || !apiSecret) return respond(503, { error: "LiveKit server credentials are not configured in Edge Function secrets" });
   const authorization = request.headers.get("Authorization") || "";
-  const bearer = authorization.replace(/^Bearer\\s+/i, "");
+  const bearer = authorization.replace(/^Bearer\s+/i, "");
   if (!bearer || bearer.startsWith("sb_publishable_")) return respond(401, { error: "Sign-in is required" });
   const client = createClient(url, anonKey, { global: { headers: { Authorization: authorization } }, auth: { persistSession: false, autoRefreshToken: false } });
   const { data: auth, error: authError } = await client.auth.getUser(bearer);
