@@ -61,6 +61,18 @@ jobs:
       - name: Run media worker tests
         run: npm test
 
+  supabase-functions-verify:
+    name: Supabase Edge Functions · Deno typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Typecheck all Supabase Edge Functions
+        run: deno check supabase/functions/*/index.ts
+
   mobile-verify:
     name: Expo · TypeScript and Android export
     runs-on: ubuntu-latest
