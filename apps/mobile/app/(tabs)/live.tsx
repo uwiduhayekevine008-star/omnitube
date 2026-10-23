@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import * as Crypto from "expo-crypto";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { router } from "expo-router";
@@ -38,7 +39,7 @@ export default function LiveScreen() {
     }
     if (!title.trim()) { Alert.alert("Give your stream a title", "A title makes it easier for the community to understand the live session."); return; }
     setStarting(true);
-    const id = crypto.randomUUID();
+    const id = Crypto.randomUUID();
     const { data: created, error } = await supabase.from("live_streams").insert({
       id, creator_id: user.id, title: title.trim(), description: description.trim(),
       status: "live", visibility: "public", provider: "livekit", room_name: "omnitube-" + id,
