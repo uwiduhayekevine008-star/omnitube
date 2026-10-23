@@ -8,6 +8,7 @@ export const theme = {
   muted: "#929BB2",
   subtle: "#666F86",
   mint: "#63EAC8",
+  mintDark: "#092A25",
   violet: "#A99AFF",
   coral: "#FF8A9D",
   blue: "#85BAFF",
