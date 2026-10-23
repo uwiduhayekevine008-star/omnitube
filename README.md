@@ -117,7 +117,20 @@ npx supabase secrets set LIVEKIT_API_KEY=YOUR_LIVEKIT_API_KEY LIVEKIT_API_SECRET
 
 Set \`VITE_LIVEKIT_URL\` to the connection URL given by your LiveKit service. A broadcast token cannot make LiveKit work without an actual LiveKit deployment and valid server credentials; the app reports this configuration requirement rather than faking a live connection.
 
-## 4. Adaptive video delivery and media-worker operations
+## 4. Web deployment on Netlify
+
+The root `netlify.toml` is configured for the Vite single-page app: `npm run build`, publish directory `dist`, Node.js 22, client-side route fallback, safe browser headers, and immutable caching for fingerprinted assets.
+
+To enable real continuous deployment, connect this GitHub repository to a new Netlify project and use `main` as the production branch. Set these **site environment variables** in Netlify's UI before the first build:
+
+- `VITE_SUPABASE_URL`: the URL of the authorized production Supabase project.
+- `VITE_SUPABASE_PUBLISHABLE_KEY`: that project's public `sb_publishable_...` key.
+
+These values are public build-time configuration, not server secrets. Never put `SUPABASE_SERVICE_ROLE_KEY`, LiveKit API secrets, push provider credentials, or any privileged key in `VITE_*` variables. The Supabase URL and publishable key must belong to the same project as the deployed database schema and Edge Functions. Build output created without valid values intentionally reports an unconfigured backend instead of simulating success.
+
+The repository is prepared for Netlify builds, but a successful deployment still requires connecting it to a Netlify site and authorizing the intended Supabase project. A Netlify site connection and a live production deploy are not inferred from the presence of `netlify.toml`.
+
+## 5. Adaptive video delivery and media-worker operations
 
 Newly published videos are queued in the private `media_processing_jobs` table. The worker in `services/media-worker` downloads the owner-scoped source from private storage, validates dimensions and duration with `ffprobe`, creates H.264/AAC HLS renditions with FFmpeg (360p and higher profiles when the source supports them), writes a master manifest, uploads segments/manifests to the private `omnitube-renditions` bucket, and marks the video media state `ready`. The web player uses HLS.js where native HLS is not available; Expo Video receives explicit HLS content type on native playback. Until a rendition is ready, playback authorization can return a short-lived signed URL for the original file.
 
@@ -145,13 +158,13 @@ The environment file must be delivered by a secret manager and contain `SUPABASE
 
 Verify a deployment with an authenticated account and a small permitted source video: the upload must appear in the private source bucket, a queue row must be created, worker logs must show a completed transcode, a private HLS manifest must be uploaded, and the public playback endpoint must return an HLS playback URL. Also test anonymous access to private media, visibility changes after ticket issuance, network failure/retry, corrupt input, worker restart, and deletion during processing. These live service checks are not performed by a source-code commit or GitHub CI alone.
 
-## 5. Auth and email
+## 6. Auth and email
 
 Enable email OTP / magic-link sign-in in Supabase Auth. Set the Auth Site URL to your deployed site and allow your local development origin (normally `http://localhost:5173`) under redirect URLs. Configure sender/SMTP and rate limits appropriate for your audience. Verify the email link flow after setting up your domain.
 
  Set the Auth Site URL to your deployed site and allow your local development origin (normally \`http://localhost:5173\`) under redirect URLs. Configure sender/SMTP and rate limits appropriate for your audience. Verify the email link flow after setting up your domain.
 
-## 6. Production-readiness checklist
+## 7. Production-readiness checklist
 
 Before launch, complete and verify these environment-dependent operations:
 
