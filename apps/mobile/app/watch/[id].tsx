@@ -53,8 +53,11 @@ export default function WatchScreen() {
         const nextVideo = { ...(data as VideoRow), creator: creator as Profile | null };
         setVideo(nextVideo);
         try {
-          const url = await resolvePlayback(id);
-          if (active) await player.replaceAsync({ uri: url });
+          const source = await resolvePlayback(id);
+          if (active) await player.replaceAsync({
+            uri: source.url,
+            contentType: source.type === "hls" ? "hls" : "auto",
+          });
           if (active) { player.play(); setPlaybackError(""); }
         } catch (error) {
           if (active) setPlaybackError(error instanceof Error ? error.message : "Playback could not be authorized.");
