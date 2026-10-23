@@ -98,7 +98,7 @@ export default function CommunityScreen() {
         <SectionTitle title="Community feed" detail="A little more connection in every scroll."/>
         {loading ? <ActivityIndicator color={theme.mint} style={{ marginVertical: 28 }}/> : null}
       </View>}
-      ListEmptyComponent={!loading ? <EmptyState icon="chatbubbles-outline" title="Start the conversation." detail="No public posts are available yet. Your first update can start the community feed."/> : null}
+      ListEmptyComponent={!loading ? <EmptyState icon="chatbubbles-outline" title="Start the conversation." detail="No public posts are available yet. Your first update can start the community feed."/> : undefined}
     />
   </AppScreen>;
 }
