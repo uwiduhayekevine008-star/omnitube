@@ -18,7 +18,6 @@
     },
     "android": {
       "package": "com.omnitube.mobile",
-      "edgeToEdgeEnabled": true,
       "permissions": [
         "CAMERA",
         "RECORD_AUDIO",
