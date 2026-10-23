@@ -57,24 +57,31 @@ security definer
 set search_path = ''
 as $$
 begin
-  if new.status = 'published'
-     and (tg_op = 'INSERT' or old.status is distinct from new.status) then
-    insert into public.media_processing_jobs(video_id, status, attempts, available_at, locked_at, locked_by, last_error, updated_at)
-    values(new.id, 'pending', 0, now(), null, null, '', now())
-    on conflict (video_id) do update
-      set status = 'pending',
-          attempts = 0,
-          available_at = now(),
-          locked_at = null,
-          locked_by = null,
-          last_error = '',
-          updated_at = now();
-
-    update public.videos
-      set media_status = 'queued',
-          playback_manifest_path = null
-      where id = new.id;
+  if new.status is distinct from 'published' then
+    return new;
   end if;
+
+  -- OLD is not defined during INSERT, so only read it in an UPDATE branch.
+  if tg_op = 'UPDATE' and old.status is not distinct from new.status then
+    return new;
+  end if;
+
+  insert into public.media_processing_jobs(video_id, status, attempts, available_at, locked_at, locked_by, last_error, updated_at)
+  values(new.id, 'pending', 0, now(), null, null, '', now())
+  on conflict (video_id) do update
+    set status = 'pending',
+        attempts = 0,
+        available_at = now(),
+        locked_at = null,
+        locked_by = null,
+        last_error = '',
+        updated_at = now();
+
+  update public.videos
+    set media_status = 'queued',
+        playback_manifest_path = null
+    where id = new.id;
+
   return new;
 end;
 $$;
