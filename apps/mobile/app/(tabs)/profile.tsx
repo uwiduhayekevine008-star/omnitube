@@ -113,17 +113,18 @@ export default function ProfileScreen() {
 
   const confirmDeleteVideo = async (video: VideoRow) => {
     if (!user) return;
-    const { error } = await supabase.from("videos").delete().eq("id", video.id).eq("creator_id", user.id);
-    if (error) { Alert.alert("Video was not deleted", error.message); return; }
-    const [media, thumbnail] = await Promise.all([
-      supabase.storage.from("omnitube-videos").remove([video.video_path]),
-      video.thumbnail_path ? supabase.storage.from("omnitube-thumbnails").remove([video.thumbnail_path]) : Promise.resolve({ error: null }),
-    ]);
+    const { data, error } = await supabase.functions.invoke("delete-video", { body: { videoId: video.id } });
+    if (error || !data?.success) {
+      Alert.alert(
+        "Video deletion is not complete",
+        error?.message || data?.error || "Media cleanup could not be confirmed. Keep this entry and retry deletion.",
+      );
+      return;
+    }
     setVideos((old) => old.filter((row) => row.id !== video.id));
     setSavedVideos((old) => old.filter((row) => row.id !== video.id));
     if (editingVideo?.id === video.id) setEditingVideo(null);
-    if (media.error || thumbnail.error) Alert.alert("Video record deleted", "The database record is gone, but a media object may need storage cleanup.");
-    else Alert.alert("Video deleted", "The upload and its related content have been removed.");
+    Alert.alert("Video deleted", "The server confirmed the original media and thumbnail were removed.");
   };
 
   const saveProfile = async () => {
