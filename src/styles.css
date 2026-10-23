@@ -651,3 +651,78 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
     min-height: 44px;
   }
 }
+
+/* Web community discussions are first-class, backend-connected interactions. */
+.post-action.liked { color: var(--mint); }
+.post-discussion-modal { width: min(700px, 100%); padding: 22px; }
+.post-discussion-modal .modal-heading { margin-bottom: 14px; }
+.discussion-post-preview {
+  padding: 13px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #ffffff03;
+}
+.discussion-post-preview .post-body { margin: 12px 0 0; }
+.discussion-post-preview .post-media img { max-height: 190px; }
+.discussion-comments-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 17px 2px 8px;
+  color: var(--text);
+  font-size: 12px;
+}
+.discussion-comments-heading span {
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  color: var(--muted);
+  font-size: 10px;
+}
+.discussion-comment-list {
+  min-height: 120px;
+  max-height: min(38vh, 320px);
+  margin: 0 -2px 12px;
+  overflow-y: auto;
+}
+.discussion-comment-list .comments-empty { margin: 30px 0; }
+.post-comment-delete {
+  margin-top: 6px;
+  padding: 2px 0;
+  border: 0;
+  background: transparent;
+  color: var(--quiet);
+  font-size: 9px;
+}
+.post-comment-delete:hover { color: var(--coral); }
+.discussion-composer { margin: 0; padding: 8px 10px; }
+.discussion-composer .avatar { flex: 0 0 auto; }
+.discussion-composer input {
+  min-width: 0;
+  flex: 1;
+  padding: 0 3px;
+  border: 0;
+  background: transparent;
+}
+.discussion-composer input:focus { box-shadow: none; }
+.discussion-sign-in {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.discussion-sign-in .btn { min-height: 38px; }
+@media (max-width: 600px) {
+  .post-discussion-modal { padding: 14px; border-radius: 16px; }
+  .discussion-post-preview { padding: 11px; }
+  .discussion-comment-list { max-height: 38vh; }
+  .discussion-composer { gap: 7px; padding: 7px; }
+  .discussion-composer .avatar { display: none; }
+  .discussion-sign-in { align-items: stretch; flex-direction: column; }
+}
