@@ -122,24 +122,38 @@ grant insert (creator_id, body, media_urls, visibility) on table public.posts to
 grant update (body, media_urls, visibility) on table public.posts to authenticated;
 grant delete on table public.posts to authenticated;
 
-revoke update on table public.follows from authenticated;
-grant insert, delete on table public.follows to authenticated;
+revoke insert, update on table public.follows from authenticated;
+grant insert (follower_id, creator_id) on table public.follows to authenticated;
+grant delete on table public.follows to authenticated;
 
-revoke update on table public.video_reactions from authenticated;
+revoke insert, update on table public.video_reactions from authenticated;
 grant insert (video_id, user_id, reaction) on table public.video_reactions to authenticated;
 grant delete on table public.video_reactions to authenticated;
 
-revoke update on table public.post_reactions from authenticated;
+revoke insert, update on table public.post_reactions from authenticated;
 grant insert (post_id, user_id, reaction) on table public.post_reactions to authenticated;
 grant delete on table public.post_reactions to authenticated;
 
-revoke update on table public.reposts from authenticated;
+revoke insert, update on table public.reposts from authenticated;
 grant insert (video_id, user_id, caption) on table public.reposts to authenticated;
 grant delete on table public.reposts to authenticated;
+
+-- Playlist ordering is editable, but clients cannot reassign item identities or
+-- forge add timestamps using leftover table-level INSERT/UPDATE grants.
+revoke insert, update on table public.playlist_items from authenticated;
+grant insert (playlist_id, video_id, position) on table public.playlist_items to authenticated;
+grant update (position) on table public.playlist_items to authenticated;
 
 revoke insert, update, delete on table public.comments from authenticated;
 grant insert (video_id, post_id, parent_comment_id, user_id, body) on table public.comments to authenticated;
 grant delete on table public.comments to authenticated;
+
+-- Report triage status must never be set by the reporting user. Otherwise a
+-- caller could create a pre-resolved report and bypass the moderation queue.
+revoke insert, update, delete on table public.reports from authenticated;
+grant insert (reporter_id, target_type, target_id, reason, details)
+  on table public.reports to authenticated;
+
 
 -- A recipient can only acknowledge a notification; notification content and
 -- routing metadata are authored by trusted database triggers.
