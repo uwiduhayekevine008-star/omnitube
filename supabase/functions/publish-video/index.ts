@@ -33,9 +33,9 @@ Deno.serve(async (request: Request) => {
   if (listError) return respond(503, { error: "Could not verify the uploaded media object" });
   if (!(objects || []).some((object) => object.name === filename)) return respond(422, { error: "Video upload is incomplete; finish uploading before publishing" });
   const now = new Date().toISOString();
-  const { error: publishError } = await userClient.from("videos").update({
-    status: "published", published_at: now, updated_at: now
-  }).eq("id", video.id).eq("creator_id", auth.user.id);
-  if (publishError) return respond(422, { error: "The upload could not be published. Confirm that the uploaded video object is complete and valid." });
-  return respond(200, { success: true, videoId: video.id, publishedAt: now });
+  const { data: published, error: publishError } = await userClient.from("videos").update({
+    status: "published", updated_at: now
+  }).eq("id", video.id).eq("creator_id", auth.user.id).select("id,published_at").single();
+  if (publishError || !published) return respond(422, { error: "The upload could not be published. Confirm that the uploaded video object is complete and valid." });
+  return respond(200, { success: true, videoId: video.id, publishedAt: published.published_at });
 });
