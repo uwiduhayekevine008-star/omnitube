@@ -11,7 +11,7 @@ Deno.serve(async (request: Request) => {
   try { input = await request.json(); } catch { return respond(400, { error: "A valid JSON body is required" }); }
   if (typeof input.videoId !== "string" || !/^[0-9a-f-]{36}$/i.test(input.videoId)) return respond(400, { error: "A valid videoId is required" });
   const admin = createClient(supabaseUrl, privilegedKey, { auth: { autoRefreshToken: false, persistSession: false } });
-  const bearer = (request.headers.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
+  const bearer = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "");
   let viewerId: string | null = null;
   if (bearer && !bearer.startsWith("sb_publishable_")) {
     const { data } = await admin.auth.getUser(bearer);
