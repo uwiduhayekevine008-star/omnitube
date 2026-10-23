@@ -570,3 +570,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .live-chat-messages { min-height: 150px; max-height: 260px; flex: 0 1 auto; }
   .live-chat-empty { min-height: 125px; }
 }
+
+
+/* Content reporting */
+.report-modal { width: min(530px, 100%); padding: 24px; }
+.report-modal .eyebrow { margin-bottom: 8px; }
+.report-modal .modal-heading { margin-bottom: 22px; }
+.report-modal .modal-heading h2 { font-size: 22px; }
+.report-modal .stack-form select {
+  width: 100%; min-height: 39px; padding: 0 11px; border: 1px solid #aeb6d220;
+  border-radius: 9px; outline: 0; background: #0b0e17; color: #f0f2fa; font-size: 11px;
+}
+.report-modal .stack-form select:focus { border-color: #59ebc85e; box-shadow: 0 0 0 3px #59ebc80b; }
+.report-modal .stack-form .modal-footer { margin-top: 7px; }
+.post-action:has(svg.lucide-shield-alert):hover { color: var(--coral); }
+@media (max-width: 600px) {
+  .report-modal { padding: 19px 16px; }
+  .report-modal .modal-heading h2 { font-size: 20px; }
+}
