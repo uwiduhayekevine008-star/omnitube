@@ -4,7 +4,7 @@ The native Android/iOS client lives in `apps/mobile` and shares the production S
 
 ## Requirements
 
-- Node.js 22.13+ (Expo SDK 57 requirement)
+- Node.js 22.13+ (Expo SDK 58)
 - Android Studio + Android SDK for local Android builds, or Xcode on macOS for local iOS builds
 - A physical device or emulator
 - A LiveKit endpoint and server credentials only when you want real live-room broadcasts
@@ -77,8 +77,15 @@ Publishing to Google Play/App Store requires the correct signing, store accounts
 - Community post creation, reactions, comments, sharing and moderation reports.
 - Creator channels, profile editing, channel stats, and saved library.
 - Native creator upload flow with resumable TUS upload, visibility/tags/category/comment options, thumbnail upload to private storage, and server-validated publishing.
-- Notifications with real-time delivery and entity deep links.
+- Notifications with private device-token registration, realtime inbox updates, push-send dispatch through Expo Push Service, and entity deep links. Remote push requires a configured EAS project, user permission, and a native development/release build.
+- Device settings for autoplay in Shorts, haptics, reduced-data playback, cache clearing, account controls, and optional push notification registration.
+- Creator analytics dashboard with top-content ranking, 7/28-day recorded view activity, follower totals, content mix, and viewing-session summaries.
+- Personalized discovery ranking based on followed creators, viewing history, reaction history, category affinity, freshness and popularity; separate Following and Trending feeds.
 - Live-stream directory, authenticated LiveKit room tokens, native track views, camera/microphone controls, and persisted real-time chat.
+
+## Push notifications
+
+The SQL migration `20261023070000_native_push_notifications.sql` registers device-scoped Expo push tokens in a private, RLS-protected table and dispatches account activity notifications from the database through `pg_net` to Expo Push Service. In the mobile app, sign in and open Settings → Enable notifications. Before this works on physical devices, run `npx eas-cli login` and `npx eas-cli init` from `apps/mobile`, configure the resulting EAS project ID, then rebuild the native app. Permission denial is respected, and tokens are removed from the account on sign-out when the device is reachable. This dispatch covers app activity messages; it is not a replacement for delivery receipts, retry/dead-letter monitoring, or abuse/rate-limit infrastructure at scale.
 
 ## Media and streaming notes
 
