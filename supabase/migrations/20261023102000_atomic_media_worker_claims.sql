@@ -14,6 +14,7 @@ set search_path = ''
 as $$
 declare
   v_job record;
+  v_claimed record;
 begin
   if coalesce(current_setting('request.jwt.claim.role', true), '') not in ('service_role', 'postgres', 'supabase_admin')
      and current_user not in ('service_role', 'postgres', 'supabase_admin') then
@@ -27,7 +28,7 @@ begin
     raise exception 'Worker lease must be between 30 seconds and one hour' using errcode = '22023';
   end if;
 
-  select j.id as job_id, j.video_id as target_video_id, j.attempts as current_attempts
+  select j.id as job_id, j.video_id as target_video_id
     into v_job
   from public.media_processing_jobs j
   join public.videos v on v.id = j.video_id
@@ -51,27 +52,30 @@ begin
         updated_at = now()
     where j.id = v_job.job_id
       and j.status = 'pending'
-    returning j.id, j.video_id, j.attempts into id, video_id, attempts;
+    returning j.id as claimed_id, j.video_id as claimed_video_id, j.attempts as claimed_attempts
+      into v_claimed;
 
-  if id is null then
+  if not found then
     return;
   end if;
 
   update public.videos v
     set media_status = 'processing',
         updated_at = now()
-    where v.id = video_id
+    where v.id = v_claimed.claimed_video_id
       and v.status = 'published'
       and v.media_status = 'queued';
 
   if not found then
-    update public.media_processing_jobs
+    update public.media_processing_jobs j
       set status = 'pending', locked_at = null, locked_by = null, available_at = now(), updated_at = now()
-      where media_processing_jobs.id = claim_media_processing_job.id;
+      where j.id = v_claimed.claimed_id
+        and j.status = 'processing'
+        and j.locked_by = p_worker_id;
     return;
   end if;
 
-  return next;
+  return query select v_claimed.claimed_id, v_claimed.claimed_video_id, v_claimed.claimed_attempts;
 end;
 $$;
 revoke all on function public.claim_media_processing_job(text, integer) from public, anon, authenticated;
@@ -106,7 +110,7 @@ begin
           last_error = 'Worker lease expired; the job was safely re-queued.',
           updated_at = now()
     where j.status = 'processing'
-      and j.locked_at < now() - make_interval(secs => p_lease_ms / 1000)
+      and j.locked_at < now() - make_interval(secs => p_lease_ms::double precision / 1000)
     returning j.video_id
   ), changed_videos as (
     update public.videos v
