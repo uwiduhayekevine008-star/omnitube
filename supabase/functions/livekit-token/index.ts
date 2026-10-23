@@ -1,0 +1,33 @@
+import { AccessToken } from "npm:livekit-server-sdk@2.13.1";
+import { createClient } from "npm:@supabase/supabase-js@2.118.0";
+const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type", "Access-Control-Allow-Methods": "POST, OPTIONS", "Content-Type": "application/json" };
+const respond = (status: number, payload: Record<string, unknown>) => new Response(JSON.stringify(payload), { status, headers: cors });
+Deno.serve(async (request: Request) => {
+  if (request.method === "OPTIONS") return new Response("ok", { headers: cors });
+  if (request.method !== "POST") return respond(405, { error: "POST required" });
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+  const privilegedKey = Deno.env.get(["SUPABASE", "SERVICE", "ROLE", "KEY"].join("_")) || "";
+  const apiKey = Deno.env.get(["LIVEKIT", "API", "KEY"].join("_")) || "";
+  const apiSecret = Deno.env.get(["LIVEKIT", "API", "SECRET"].join("_")) || "";
+  if (!supabaseUrl || !privilegedKey) return respond(503, { error: "Supabase server configuration is missing" });
+  if (!apiKey || !apiSecret) return respond(503, { error: "LiveKit server credentials are not configured in Edge Function secrets" });
+  const bearer = (request.headers.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
+  if (!bearer || bearer.startsWith("sb_publishable_")) return respond(401, { error: "Sign-in is required" });
+  const admin = createClient(supabaseUrl, privilegedKey, { auth: { autoRefreshToken: false, persistSession: false } });
+  const { data: auth, error: authError } = await admin.auth.getUser(bearer);
+  if (authError || !auth.user) return respond(401, { error: "Your session is not valid; sign in again" });
+  let input: { streamId?: unknown; role?: unknown };
+  try { input = await request.json(); } catch { return respond(400, { error: "A valid JSON body is required" }); }
+  if (typeof input.streamId !== "string" || !/^[0-9a-f-]{36}$/i.test(input.streamId)) return respond(400, { error: "A valid streamId is required" });
+  const { data: stream, error } = await admin.from("live_streams").select("id,creator_id,room_name,status,visibility,title").eq("id", input.streamId).maybeSingle();
+  if (error) return respond(500, { error: "Could not load live room permissions" });
+  if (!stream) return respond(404, { error: "Live room not found" });
+  const publisher = stream.creator_id === auth.user.id;
+  if (!publisher && (stream.status !== "live" || !["public", "unlisted"].includes(stream.visibility))) return respond(403, { error: "This live room is not available to viewers" });
+  if (input.role === "publisher" && !publisher) return respond(403, { error: "Only the channel owner can broadcast" });
+  if (input.role !== "publisher" && input.role !== "viewer") return respond(400, { error: "Unsupported room role" });
+  const { data: profile } = await admin.from("profiles").select("display_name").eq("id", auth.user.id).maybeSingle();
+  const token = new AccessToken(apiKey, apiSecret, { identity: auth.user.id, name: profile?.display_name || auth.user.email || "OmniTube creator", ttl: "1h" });
+  token.addGrant({ roomJoin: true, room: stream.room_name, canPublish: publisher && input.role === "publisher", canSubscribe: true, canPublishData: true });
+  return respond(200, { token: await token.toJwt(), roomName: stream.room_name, role: publisher ? "publisher" : "viewer" });
+});
