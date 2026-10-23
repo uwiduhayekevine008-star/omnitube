@@ -623,3 +623,31 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sign-out-button { border-color: var(--border); background: #121520; color: #8f97ac; }
 .sign-out-button:hover { color: var(--coral); border-color: #ff8c9c30; background: #ff8c9c09; }
 @media (max-width: 600px) { .sign-out-button { width: 31px; height: 31px; } }
+
+/* Keep paginated feed controls visible and comfortable across touch devices. */
+.feed-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 26px 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.feed-pagination .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+@media (max-width: 600px) {
+  .feed-pagination {
+    flex-direction: column;
+    gap: 9px;
+    padding-top: 20px;
+  }
+  .feed-pagination .btn {
+    width: 100%;
+    min-height: 44px;
+  }
+}
