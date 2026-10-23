@@ -142,7 +142,7 @@ export default function ShortsScreen() {
       showsVerticalScrollIndicator={false} getItemLayout={(_, index) => ({ length: pageHeight, offset: pageHeight * index, index })}
       onMomentumScrollEnd={(event) => { const next = Math.round(event.nativeEvent.contentOffset.y / pageHeight); setActive(next); }}
       initialNumToRender={2} maxToRenderPerBatch={2} windowSize={3} removeClippedSubviews
-      onEndReachedThreshold={0.65} onEndReached={() => { if (!loading && !loadingMore) void load(false); }} ListFooterComponent={loadingMore ? <ActivityIndicator color={theme.mint} style={{marginVertical:12}}/> : null}
+      onEndReachedThreshold={0.65} onEndReached={() => { if (!loading && !loadingMore) void load(false); }} ListFooterComponent={loadingMore ? <ActivityIndicator color={theme.mint} style={{marginVertical:12}}/> : undefined}
       style={{ flex: 1 }} />
   </AppScreen>;
 }
