@@ -964,19 +964,16 @@ function App() {
   };
   const deleteVideo = async (video: VideoRow) => {
     if (!user?.id || !window.confirm("Permanently delete “" + video.title + "”? This also removes its comments, reactions and playlist references.")) return;
-    const { error } = await supabase.from("videos").delete().eq("id", video.id).eq("creator_id", user.id);
-    if (error) { notify("Video was not deleted", error.message, "error"); return; }
-    const objects = await Promise.all([
-      supabase.storage.from("omnitube-videos").remove([video.video_path]),
-      video.thumbnail_path ? supabase.storage.from("omnitube-thumbnails").remove([video.thumbnail_path]) : Promise.resolve({ error: null })
-    ]);
+    const { data, error } = await supabase.functions.invoke("delete-video", { body: { videoId: video.id } });
+    if (error || !data?.success) {
+      notify("Video deletion is not complete", error?.message || data?.error || "The server could not confirm media cleanup. Retry deletion from Creator Studio.", "error");
+      return;
+    }
     setMyVideos((all) => all.filter((item) => item.id !== video.id));
     setVideos((all) => all.filter((item) => item.id !== video.id));
     setLibraryVideos((all) => all.filter((item) => item.id !== video.id));
     if (selectedVideo?.id === video.id) setSelectedVideo(null);
-    if (objects.some((result) => result.error)) {
-      notify("Video record deleted", "The record is gone, but one media object could not be removed. Review storage for orphaned files.", "error");
-    } else notify("Video deleted.", undefined, "success");
+    notify("Video and media files deleted.", undefined, "success");
   };
 
   const signOut = async () => {
