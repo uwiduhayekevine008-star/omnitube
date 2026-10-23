@@ -117,7 +117,7 @@ function VideoCard({ video, onPlay, onLike, onSave, onRepost, user, following, o
   user: boolean; following: boolean; onFollow: () => void; onReport: () => void;
 }) {
   const [menu, setMenu] = useState(false);
-  const thumbnail = storagePublicUrl(video.thumbnail_path);
+  const thumbnail = useSignedThumbnail(video.thumbnail_path);
   return <article className={"video-card " + (video.kind === "short" ? "short-card" : "")}>
     <button className="thumbnail-button" onClick={onPlay} aria-label={"Play " + video.title}>
       <div className="video-thumbnail" style={thumbnail ? { backgroundImage: "url(" + thumbnail + ")" } : undefined}>
@@ -297,8 +297,9 @@ function UploadDialog({ userId, notify, onClose, onPublished }: {
       });
       if (image) {
         setPhase("Uploading thumbnail");
-        const imagePath = userId + "/thumbnails/" + id + "-" + image.name.replace(/[^a-zA-Z0-9._-]/g, "").slice(-80);
-        const { error: imageError } = await supabase.storage.from("omnitube-assets").upload(imagePath, image, { upsert: false, contentType: image.type });
+        if (!["image/jpeg", "image/png", "image/webp", "image/avif"].includes(image.type) || image.size > 15 * 1024 * 1024) throw new Error("Thumbnail must be JPEG, PNG, WebP or AVIF and no larger than 15 MB.");
+        const imagePath = userId + "/" + id + "-" + image.name.replace(/[^a-zA-Z0-9._-]/g, "").slice(-80);
+        const { error: imageError } = await supabase.storage.from("omnitube-thumbnails").upload(imagePath, image, { upsert: false, contentType: image.type });
         if (imageError) throw imageError;
         const { error: updateError } = await supabase.from("videos").update({ thumbnail_path: imagePath }).eq("id", id).eq("creator_id", userId);
         if (updateError) throw updateError;
@@ -920,7 +921,7 @@ function App() {
           <div className="studio-action-card"><div className="studio-action-icon blue"><MessageCircle /></div><h3>Build a community</h3><p>Publish updates and conversations that live alongside your videos.</p><button className="btn btn-quiet" onClick={() => chooseSection("posts")}>Open community <ChevronDown size={15} /></button></div>
           <div className="studio-library-panel"><div className="studio-library-heading"><div><p className="eyebrow">YOUR CONTENT</p><h3>Manage your uploads</h3></div><span>{myVideos.length} {myVideos.length === 1 ? "video" : "videos"}</span></div>
             {studioLoading ? <div className="studio-library-loading"><span className="spinner" /> Loading your library…</div> : myVideos.map((item) => <article className="studio-video-row" key={item.id}>
-              <div className="studio-video-thumb" style={storagePublicUrl(item.thumbnail_path) ? { backgroundImage: "url(" + storagePublicUrl(item.thumbnail_path) + ")" } : undefined}><VideoIcon size={18} /></div>
+              <ThumbnailPreview path={item.thumbnail_path} />
               <div className="studio-video-copy"><strong>{item.title}</strong><span>{item.status.toUpperCase()} · {item.visibility} · {item.kind === "short" ? "Short" : "Video"}</span><small>{formatCount(item.views_count)} views · {timeAgo(item.published_at || item.created_at)}</small></div>
               <button className="btn btn-quiet studio-video-edit" onClick={() => setEditingVideo(item)} disabled={item.status === "failed"}><Settings size={14} /> Edit</button>
               <button className="icon-btn studio-video-delete" onClick={() => void deleteVideo(item)} aria-label={"Delete " + item.title} title="Delete video"><X size={16} /></button>
