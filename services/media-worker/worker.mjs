@@ -317,8 +317,8 @@ async function processVideo(admin, job) {
     await assertJobLease(admin, job);
 
     await assertJobLease(admin, job);
-    let posterPath = video.thumbnail_path;
-    if (!posterPath) {
+    let generatedPosterPath = null;
+    if (!video.thumbnail_path) {
       const posterLocal = join(temp, "poster.jpg");
       if (await generatePoster(sourcePath, posterLocal, source.duration)) {
         const posterBytes = await readFile(posterLocal);
@@ -328,26 +328,21 @@ async function processVideo(admin, job) {
           cacheControl: "3600",
           upsert: true,
         });
-        if (!posterError) posterPath = candidate;
+        if (!posterError) generatedPosterPath = candidate;
         else log("warn", "poster_upload_failed", { jobId: job.id, videoId: video.id });
       }
     }
 
     await assertJobLease(admin, job);
-    const { data: finalized, error: finalizeError } = await admin.from("videos").update({
-      playback_manifest_path: `${basePath}/master.m3u8`,
-      media_status: "ready",
-      ...(posterPath ? { thumbnail_path: posterPath } : {}),
-      duration_seconds: Math.round(source.duration * 100) / 100,
-      updated_at: new Date().toISOString(),
-    }).eq("id", video.id).eq("status", "published").select("id").maybeSingle();
-    if (finalizeError) throw new Error("Could not activate generated media renditions");
-    if (!finalized) throw new MediaJobCancelledError("Video was deleted before rendition activation");
-
-    const { error: jobError } = await admin.from("media_processing_jobs").update({
-      status: "succeeded", locked_at: null, locked_by: null, last_error: "", updated_at: new Date().toISOString(),
-    }).eq("id", job.id);
-    if (jobError) throw new Error("Renditions are uploaded but job completion could not be recorded");
+    const { data: finalized, error: finalizeError } = await admin.rpc("complete_media_processing_job", {
+      p_job_id: job.id,
+      p_worker_id: workerId,
+      p_manifest_path: `${basePath}/master.m3u8`,
+      p_duration_seconds: Math.round(source.duration * 100) / 100,
+      p_thumbnail_path: generatedPosterPath,
+    });
+    if (finalizeError) throw new Error("Could not atomically activate generated media renditions");
+    if (finalized !== true) throw new MediaJobCancelledError("Video was removed or the media-processing lease was lost before finalization");
     log("info", "transcode_succeeded", { jobId: job.id, videoId: video.id, variants: variants.map((v) => v.name), duration: source.duration });
   } finally {
     await rm(temp, { recursive: true, force: true });
@@ -388,18 +383,24 @@ async function handleFailure(admin, job, error) {
   const retry = job.attempts < maxAttempts;
   const delayMs = Math.min(30 * 60 * 1000, 15000 * (2 ** Math.max(0, job.attempts - 1)));
   const now = new Date().toISOString();
-  await admin.from("media_processing_jobs").update({
+  const { data: released, error: releaseError } = await admin.from("media_processing_jobs").update({
     status: retry ? "pending" : "failed",
     available_at: new Date(Date.now() + (retry ? delayMs : 0)).toISOString(),
     locked_at: null,
     locked_by: null,
     last_error: message,
     updated_at: now,
-  }).eq("id", job.id);
-  await admin.from("videos").update({
+  }).eq("id", job.id).eq("status", "processing").eq("locked_by", workerId).select("id").maybeSingle();
+  if (releaseError) throw new Error("Could not safely release the failed media-processing lease");
+  if (!released) {
+    log("info", "stale_worker_failure_ignored", { jobId: job.id, videoId: job.video_id });
+    return;
+  }
+  const { error: videoError } = await admin.from("videos").update({
     media_status: retry ? "queued" : "failed",
     updated_at: now,
-  }).eq("id", job.video_id);
+  }).eq("id", job.video_id).eq("status", "published").eq("media_status", "processing");
+  if (videoError) throw new Error("Job was released but media status could not be synchronized");
   log(retry ? "warn" : "error", "transcode_failed", {
     jobId: job.id, videoId: job.video_id, attempts: job.attempts, retry, error: message,
   });
