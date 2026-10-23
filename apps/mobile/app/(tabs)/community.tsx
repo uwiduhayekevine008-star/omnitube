@@ -26,11 +26,11 @@ export default function CommunityScreen() {
     if (error) {
       Alert.alert("Community could not load", error.message);
     } else {
-      try { setPosts(await hydratePosts((data || []) as PostRow[])); }
+      try { setPosts(await hydratePosts((data || []) as PostRow[], user?.id || null)); }
       catch (e) { Alert.alert("Community could not load", e instanceof Error ? e.message : "Please try again."); }
     }
     setLoading(false); setRefreshing(false);
-  }, []);
+  }, [user?.id]);
   useEffect(() => { void load(); }, [load]);
 
   const publish = async () => {
@@ -46,12 +46,19 @@ export default function CommunityScreen() {
 
   const reactToPost = async (post: PostRow) => {
     if (!user) { Alert.alert("Join the conversation", "Sign in to react to creator posts.", [{ text: "Cancel" }, { text: "Sign in", onPress: () => router.push("/(tabs)/profile") }]); return; }
-    const { data: current } = await supabase.from("post_reactions").select("reaction").eq("post_id", post.id).eq("user_id", user.id).maybeSingle();
-    const result = current
+    const liked = Boolean(post.likedByMe);
+    const result = liked
       ? await supabase.from("post_reactions").delete().eq("post_id", post.id).eq("user_id", user.id)
       : await supabase.from("post_reactions").insert({ post_id: post.id, user_id: user.id, reaction: "like" });
     if (result.error) Alert.alert("Reaction failed", result.error.message);
-    else setPosts((old) => old.map((item) => item.id === post.id ? { ...item, likesCount: Math.max(0, Number(item.likesCount || 0) + (current ? -1 : 1)) } : item));
+    else {
+      setPosts((old) => old.map((item) => item.id === post.id ? {
+        ...item,
+        likesCount: Math.max(0, Number(item.likesCount || 0) + (liked ? -1 : 1)),
+        likedByMe: !liked,
+      } : item));
+      await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    }
   };
   const reportPost = (post: PostRow) => {
     if (!user) { Alert.alert("Sign in to report", "Reports are private and tied to your account."); return; }
@@ -77,7 +84,7 @@ export default function CommunityScreen() {
     <Link href={{ pathname: "/community/[id]", params: { id: item.id } }} asChild><Pressable><Text style={styles.postBody}>{item.body}</Text></Pressable></Link>
     {item.media_urls?.length ? <Text style={styles.mediaNotice}>{item.media_urls.length} attachment(s)</Text> : null}
     <View style={styles.postActions}>
-      <Pressable onPress={() => void reactToPost(item)} style={styles.postAction}><Ionicons name="heart-outline" size={18} color={theme.coral}/><Text style={styles.actionText}>{formatCount(item.likesCount || 0)} Likes</Text></Pressable>
+      <Pressable onPress={() => void reactToPost(item)} accessibilityRole="button" accessibilityLabel={item.likedByMe ? "Unlike post" : "Like post"} accessibilityState={{ selected: Boolean(item.likedByMe) }} style={styles.postAction}><Ionicons name={item.likedByMe ? "heart" : "heart-outline"} size={18} color={item.likedByMe ? theme.coral : theme.muted}/><Text style={[styles.actionText, item.likedByMe && { color: theme.coral }]}>{formatCount(item.likesCount || 0)} {item.likedByMe ? "Liked" : "Likes"}</Text></Pressable>
       <Link href={{ pathname: "/community/[id]", params: { id: item.id } }} asChild><Pressable style={styles.postAction}><Ionicons name="chatbubble-ellipses-outline" size={17} color={theme.muted}/><Text style={styles.actionText}>{formatCount(item.commentsCount || 0)} Replies</Text></Pressable></Link>
       <Pressable onPress={() => void Share.share({ message: item.body + "\nhttps://omnitube.app/community/" + item.id })} style={styles.postAction}><Ionicons name="arrow-redo-outline" size={17} color={theme.muted}/><Text style={styles.actionText}>Share</Text></Pressable>
     </View>

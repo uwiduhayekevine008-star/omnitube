@@ -236,7 +236,7 @@ create policy reposts_delete_self on public.reposts for delete to authenticated 
 drop policy if exists comments_read_public_target_or_owner on public.comments;
 create policy comments_read_public_target_or_owner on public.comments for select to anon,authenticated using(user_id=(select auth.uid()) or (video_id is not null and exists(select 1 from public.videos v where v.id=video_id and v.status='published' and v.visibility in ('public','unlisted'))) or (post_id is not null and exists(select 1 from public.posts p where p.id=post_id and p.visibility='public')));
 drop policy if exists comments_insert_self on public.comments;
-create policy comments_insert_self on public.comments for insert to authenticated with check(user_id=(select auth.uid()) and ((video_id is not null and exists(select 1 from public.videos v where v.id=video_id and v.status='published' and v.allow_comments=true and v.visibility in ('public','unlisted'))) or (post_id is not null and exists(select 1 from public.posts p where p.id=post_id and p.visibility='public')));
+create policy comments_insert_self on public.comments for insert to authenticated with check(user_id=(select auth.uid()) and ((video_id is not null and exists(select 1 from public.videos v where v.id=video_id and v.status='published' and v.allow_comments=true and v.visibility in ('public','unlisted'))) or (post_id is not null and exists(select 1 from public.posts p where p.id=post_id and p.visibility='public'))));
 drop policy if exists comments_update_self on public.comments;
 create policy comments_update_self on public.comments for update to authenticated using(user_id=(select auth.uid())) with check(user_id=(select auth.uid()));
 drop policy if exists comments_delete_self on public.comments;

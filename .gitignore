@@ -11,3 +11,4 @@ coverage/
 .idea/
 *.tsbuildinfo
 supabase/.temp/
+.netlify/

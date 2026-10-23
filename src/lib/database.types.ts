@@ -592,6 +592,8 @@ export type Database = {
           duration_seconds: number | null
           id: string
           kind: string
+          media_status: string
+          playback_manifest_path: string | null
           published_at: string | null
           status: string
           tags: string[]
@@ -611,6 +613,8 @@ export type Database = {
           duration_seconds?: number | null
           id?: string
           kind?: string
+          media_status?: string
+          playback_manifest_path?: string | null
           published_at?: string | null
           status?: string
           tags?: string[]
@@ -630,6 +634,8 @@ export type Database = {
           duration_seconds?: number | null
           id?: string
           kind?: string
+          media_status?: string
+          playback_manifest_path?: string | null
           published_at?: string | null
           status?: string
           tags?: string[]
@@ -647,7 +653,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      record_video_watch: {
+        Args: {
+          p_source?: string
+          p_video_id: string
+          p_watch_seconds: number
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never

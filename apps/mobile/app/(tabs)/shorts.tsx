@@ -17,22 +17,44 @@ function ShortSlide({ video, active, userId, onLike, onSave, autoPlay, hapticsEn
   const [playbackError, setPlaybackError] = useState("");
   const [liked, setLiked] = useState(false);
   const [paused, setPaused] = useState(false);
-  const player = useVideoPlayer(null, (instance) => { instance.loop = true; instance.muted = false; });
+  const player = useVideoPlayer(null, (instance) => { instance.loop = true; instance.muted = false; instance.timeUpdateEventInterval = 10; });
   useEffect(() => {
     let activeRequest = true;
     if (!active) { player.pause(); return () => { activeRequest = false; }; }
     setPlaybackError("");
-    void resolvePlayback(video.id).then((url) => {
+    void resolvePlayback(video.id).then((source) => {
       if (!activeRequest) return;
-      setPlayback(url);
+      setPlayback(source.url);
       setPaused(!autoPlay);
-      return player.replaceAsync({ uri: url, useCaching: !reduceDataUsage }).then(() => {
+      return player.replaceAsync({
+        uri: source.url,
+        contentType: source.type === "hls" ? "hls" : "auto",
+        useCaching: source.type !== "hls" && !reduceDataUsage,
+      }).then(() => {
         if (!activeRequest) return;
         if (autoPlay) player.play(); else player.pause();
       });
     }).catch((error) => { if (activeRequest) setPlaybackError(error instanceof Error ? error.message : "Playback could not be loaded."); });
     return () => { activeRequest = false; player.pause(); };
   }, [active, video.id, player, autoPlay, reduceDataUsage]);
+  useEffect(() => {
+    if (!active || !userId) return;
+    let lastRecordedSecond = 0;
+    const subscription = player.addListener("timeUpdate", ({ currentTime }) => {
+      const second = Math.floor(currentTime);
+      if (second < 1 || (lastRecordedSecond > 0 && second - lastRecordedSecond < 10)) return;
+      lastRecordedSecond = second;
+      void supabase.rpc("record_video_watch", {
+        p_video_id: video.id,
+        p_watch_seconds: second,
+        p_source: "shorts",
+      }).then(({ error }) => {
+        if (error) console.warn("Short watch progress could not be saved", error.message);
+      });
+    });
+    return () => subscription.remove();
+  }, [active, player, userId, video.id]);
+
   useEffect(() => {
     let alive = true;
     if (!active || !userId) { setLiked(false); return () => { alive = false; }; }
