@@ -25,6 +25,36 @@ export default function WatchScreen() {
   const [showAllComments, setShowAllComments] = useState(false);
   const player = useVideoPlayer(null, (instance) => { instance.loop = false; instance.muted = false; });
   const viewRecorded = useRef(false);
+  const watchBaseSeconds = useRef(0);
+  const watchedSeconds = useRef(0);
+  const watchDate = useRef(new Date().toISOString().slice(0, 10));
+  const [watchTrackingReady, setWatchTrackingReady] = useState(false);
+
+  const persistWatchTime = useCallback(async () => {
+    if (!video?.id || !user?.id || !watchTrackingReady || watchedSeconds.current <= 0) return;
+    const { error } = await supabase.from("video_views").update({
+      watch_seconds: watchBaseSeconds.current + watchedSeconds.current,
+    }).eq("video_id", video.id).eq("viewer_id", user.id).eq("view_date", watchDate.current);
+    if (error && __DEV__) console.warn("OmniTube watch-time update unavailable:", error.message);
+  }, [video?.id, user?.id, watchTrackingReady]);
+
+  useEffect(() => {
+    if (!video?.id || !user?.id || !watchTrackingReady) return;
+    let unsavedSeconds = 0;
+    const interval = setInterval(() => {
+      if (!player.playing) return;
+      watchedSeconds.current += 1;
+      unsavedSeconds += 1;
+      if (unsavedSeconds >= 10) {
+        unsavedSeconds = 0;
+        void persistWatchTime();
+      }
+    }, 1000);
+    return () => {
+      clearInterval(interval);
+      void persistWatchTime();
+    };
+  }, [video?.id, user?.id, watchTrackingReady, player, persistWatchTime]);
 
   const loadComments = useCallback(async () => {
     if (!id) return;
@@ -42,6 +72,10 @@ export default function WatchScreen() {
   useEffect(() => {
     let active = true;
     viewRecorded.current = false;
+    setWatchTrackingReady(false);
+    watchBaseSeconds.current = 0;
+    watchedSeconds.current = 0;
+    watchDate.current = new Date().toISOString().slice(0, 10);
     void (async () => {
       setLoading(true);
       try {
@@ -71,8 +105,24 @@ export default function WatchScreen() {
         }
         if (user && !viewRecorded.current) {
           viewRecorded.current = true;
-          const today = new Date().toISOString().slice(0, 10);
-          await supabase.from("video_views").upsert({ video_id: id, viewer_id: user.id, view_date: today, watch_seconds: 1, source: "direct" }, { onConflict: "video_id,viewer_id,view_date" });
+          const today = watchDate.current;
+          const { data: priorView } = await supabase.from("video_views").select("watch_seconds")
+            .eq("video_id", id).eq("viewer_id", user.id).eq("view_date", today).maybeSingle();
+          if (!priorView) {
+            const { error: insertViewError } = await supabase.from("video_views").insert({
+              video_id: id, viewer_id: user.id, view_date: today, watch_seconds: 0, source: "direct",
+            });
+            if (insertViewError && insertViewError.code !== "23505" && __DEV__) {
+              console.warn("OmniTube view event could not be recorded:", insertViewError.message);
+            }
+          }
+          const { data: currentView } = await supabase.from("video_views").select("watch_seconds")
+            .eq("video_id", id).eq("viewer_id", user.id).eq("view_date", today).maybeSingle();
+          if (active && currentView) {
+            watchBaseSeconds.current = Number(currentView.watch_seconds || 0);
+            watchedSeconds.current = 0;
+            setWatchTrackingReady(true);
+          }
         }
         await loadComments();
       } catch (error) {
