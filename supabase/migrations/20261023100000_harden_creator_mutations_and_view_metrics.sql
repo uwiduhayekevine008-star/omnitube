@@ -192,11 +192,11 @@ begin
     raise exception 'Video is not available for watch tracking' using errcode = '42501';
   end if;
 
-  insert into public.video_views (video_id, viewer_id, view_date, watch_seconds, source)
+  insert into public.video_views as existing_view (video_id, viewer_id, view_date, watch_seconds, source)
   values (p_video_id, v_uid, current_date, v_seconds, v_source)
   on conflict (video_id, viewer_id, view_date)
   do update set
-    watch_seconds = greatest(public.video_views.watch_seconds, excluded.watch_seconds),
+    watch_seconds = greatest(existing_view.watch_seconds, excluded.watch_seconds),
     source = excluded.source;
 end;
 $$;
