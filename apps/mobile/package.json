@@ -41,8 +41,8 @@
     "react-native-svg": "15.15.1",
     "react-native-worklets": "0.10.1",
     "tus-js-client": "4.3.1",
-    "expo-crypto": "~57.0.1",
-    "expo-dev-client": "~57.0.1"
+    "expo-crypto": "~57.0.3",
+    "expo-dev-client": "~57.0.19"
   },
   "devDependencies": {
     "@types/react": "~19.2.2",
