@@ -78,11 +78,15 @@ export default function ShortsScreen() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [message, setMessage] = useState("");
+  const [devicePreferences, setDevicePreferences] = useState<DevicePreferences>(() => readDevicePreferences());
   const listRef = useRef<FlatList<VideoRow>>(null);
   const pageRef = useRef(0);
   const hasMoreRef = useRef(true);
   const loadingMoreRef = useRef(false);
   const pageHeight = Math.max(420, height - 145);
+  useFocusEffect(useCallback(() => {
+    setDevicePreferences(readDevicePreferences());
+  }, []));
   const load = useCallback(async (reset = true) => {
     if (!reset && (!hasMoreRef.current || loadingMoreRef.current)) return;
     if (reset) { setLoading(true); pageRef.current = 0; hasMoreRef.current = true; }
