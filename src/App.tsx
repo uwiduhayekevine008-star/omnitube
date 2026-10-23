@@ -725,6 +725,12 @@ function App() {
     } else notify("Video deleted.", undefined, "success");
   };
 
+  const signOut = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) notify("Could not sign out", error.message, "error");
+    else { setSelectedVideo(null); setReportTarget(null); setEditingVideo(null); notify("You have signed out.", undefined, "success"); }
+  };
+
   const toggleFollow = async (creatorId: string) => {
     if (!user?.id) { setAuthOpen(true); return; }
     if (creatorId === user.id) { setSection("studio"); return; }
@@ -854,7 +860,7 @@ function App() {
     <main className="main-shell">
       <header className="topbar"><div className="topbar-left"><button className="icon-btn mobile-menu" onClick={() => setSidebarOpen(true)} aria-label="Open menu"><Menu /></button><div className="breadcrumb"><span>OmniTube</span><span className="breadcrumb-slash">/</span><strong>{titleFor[section]}</strong></div></div>
         <form className="search-bar" onSubmit={(event) => { event.preventDefault(); setAppliedQuery(query.trim()); setSection("home"); }}><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search videos, creators, topics…" aria-label="Search videos, creators, and topics" /><kbd>↵</kbd></form>
-        <div className="topbar-actions"><button className="icon-btn topbar-bell" onClick={() => chooseSection("notifications")} title="Notifications"><Bell size={19} />{countUnread > 0 && <i />}</button>{user ? <button className="profile-chip" onClick={() => chooseSection("studio")}><Avatar profile={profile} size="sm" /><span>{profile?.display_name || user.email?.split("@")[0] || "Creator"}</span><ChevronDown size={14} /></button> : <button className="btn btn-primary sign-in" onClick={() => setAuthOpen(true)}><LogIn size={15} /> Sign in</button>}<button className="btn btn-primary top-create" onClick={() => { if (!user) setAuthOpen(true); else setUploadOpen(true); }}><Plus size={16} /> Create</button></div>
+        <div className="topbar-actions"><button className="icon-btn topbar-bell" onClick={() => chooseSection("notifications")} title="Notifications"><Bell size={19} />{countUnread > 0 && <i />}</button>{user ? <><button className="profile-chip" onClick={() => chooseSection("studio")}><Avatar profile={profile} size="sm" /><span>{profile?.display_name || user.email?.split("@")[0] || "Creator"}</span><ChevronDown size={14} /></button><button className="icon-btn sign-out-button" onClick={() => void signOut()} title="Sign out" aria-label="Sign out"><LogOut size={16} /></button></> : <button className="btn btn-primary sign-in" onClick={() => setAuthOpen(true)}><LogIn size={15} /> Sign in</button>}<button className="btn btn-primary top-create" onClick={() => { if (!user) setAuthOpen(true); else setUploadOpen(true); }}><Plus size={16} /> Create</button></div>
       </header>
 
       <div className="content-area">
