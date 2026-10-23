@@ -30,6 +30,22 @@ supabase/
 .env.example
 \`\`\`
 
+## Native mobile app (Expo)
+
+A React Native / Expo SDK 57 app now lives at [`apps/mobile`](apps/mobile/README.md). It has native Discover, vertical Shorts, Community, Creator Studio, Live, creator profile, notifications, video playback, comments, and secure resumable uploads.
+
+To start the Expo project:
+
+```bash
+cd apps/mobile
+npm install
+cp .env.example .env.local
+npm run typecheck
+npm run start
+```
+
+LiveKit uses native WebRTC and requires a development client or store build rather than Expo Go. See the [mobile setup guide](apps/mobile/README.md) for Android/iOS builds, environment values, EAS setup, and provider requirements. GitHub Actions now typechecks and exports both web and mobile builds.
+
 ## 1. Configure the app locally
 
 Requires Node.js 22 LTS or a compatible Node.js 20.19+ release.
