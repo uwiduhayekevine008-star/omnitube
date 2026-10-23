@@ -8,7 +8,7 @@ Deno.serve(async (request: Request) => {
   const anonKey = Deno.env.get(["SUPABASE", "ANON", "KEY"].join("_")) || "";
   if (!url || !anonKey) return respond(503, { error: "Publishing service is not configured" });
   const authorization = request.headers.get("Authorization") || "";
-  const bearer = authorization.replace(/^Bearer\\s+/i, "");
+  const bearer = authorization.replace(/^Bearer\s+/i, "");
   if (!bearer || bearer.startsWith("sb_publishable_")) return respond(401, { error: "Sign-in is required" });
   let input: { videoId?: unknown };
   try { input = await request.json(); } catch { return respond(400, { error: "A valid JSON body is required" }); }

@@ -47,7 +47,7 @@ export default function CommunityPostScreen(){
     if(!user){Alert.alert("Sign in to react","Join the community to like posts.");return;}
     const old=liked;setLiked(!old);
     const result=old?await supabase.from("post_reactions").delete().eq("post_id",post.id).eq("user_id",user.id)
-      :await supabase.from("post_reactions").upsert({post_id:post.id,user_id:user.id,reaction:"like"});
+      :await supabase.from("post_reactions").insert({post_id:post.id,user_id:user.id,reaction:"like"});
     if(result.error){setLiked(old);Alert.alert("Reaction not saved",result.error.message);}
   };
   const sendComment=async()=>{

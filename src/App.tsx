@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import * as tus from "tus-js-client";
+import Hls from "hls.js";
 import { isSupabaseConfigured, storagePublicUrl, supabase, supabaseUrl, formatCount, timeAgo } from "./lib/supabase";
 
 type Section = "home" | "trending" | "shorts" | "live" | "subscriptions" | "posts" | "library" | "notifications" | "studio";
@@ -14,13 +15,17 @@ type Profile = { id: string; username: string | null; display_name: string; avat
 type VideoRow = {
   id: string; creator_id: string; title: string; description: string; video_path: string;
   thumbnail_path: string | null; duration_seconds: number | null; visibility: string; kind: "video" | "short";
-  status: string; category: string; views_count: number; published_at: string | null; created_at: string; allow_comments?: boolean;
+  status: string; media_status: string; playback_manifest_path: string | null;
+  category: string; views_count: number; published_at: string | null; created_at: string; allow_comments?: boolean;
   video_reactions?: { count: number }[]; comments?: { count: number }[]; creator?: Profile;
 };
-type PostRow = { id: string; creator_id: string; body: string; media_urls: string[]; visibility: string; created_at: string; creator?: Profile; likes?: number };
+type PostRow = { id: string; creator_id: string; body: string; media_urls: string[]; visibility: string; created_at: string; creator?: Profile; likes?: number; likedByMe?: boolean };
+type PostCommentRow = { id: string; body: string; user_id: string; created_at: string; parent_comment_id: string | null; author?: Profile | null };
 type StreamRow = { id: string; creator_id: string; title: string; description: string; status: string; visibility: string; room_name: string; starts_at: string; creator?: Profile };
 type StreamMessage = { id: string; stream_id: string; user_id: string; body: string; created_at: string; author?: Profile | null };
 type Notice = { id: string; title: string; detail?: string; kind?: "success" | "error" | "info" };
+
+const WEB_FEED_PAGE_SIZE = 36;
 
 const NAV: { id: Section; label: string; icon: typeof Home }[] = [
   { id: "home", label: "Discover", icon: Home },
@@ -152,7 +157,9 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
   notify: (title: string, detail?: string, kind?: Notice["kind"]) => void; userId: string | null;
 }) {
   const [src, setSrc] = useState("");
+  const [playbackType, setPlaybackType] = useState<"hls" | "file">("file");
   const [loadError, setLoadError] = useState("");
+  const videoElement = useRef<HTMLVideoElement | null>(null);
   const [comments, setComments] = useState<any[]>([]);
   const [commentBody, setCommentBody] = useState("");
   const [commentBusy, setCommentBusy] = useState(false);
@@ -162,10 +169,18 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
   const lastSaved = useRef(0);
   useEffect(() => {
     let active = true;
+    setSrc("");
+    setLoadError("");
+    setPlaybackType("file");
     void supabase.functions.invoke("resolve-playback", { body: { videoId: video.id } }).then(({ data, error }) => {
       if (!active) return;
       if (error || !data?.signedUrl) setLoadError(error?.message || data?.error || "Playback could not be authorized.");
-      else setSrc(data.signedUrl as string);
+      else {
+        setPlaybackType(data.playbackType === "hls" ? "hls" : "file");
+        setSrc(data.signedUrl as string);
+      }
+    }).catch((error) => {
+      if (active) setLoadError(error instanceof Error ? error.message : "Playback could not be authorized.");
     });
     void (async () => {
       const { data } = await supabase.from("comments").select("id,body,user_id,created_at").eq("video_id", video.id).order("created_at", { ascending: false }).limit(60);
@@ -181,14 +196,67 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
     }
     return () => { active = false; };
   }, [video.id, userId]);
+  useEffect(() => {
+    const element = videoElement.current;
+    if (!element || !src || playbackType !== "hls") return;
+
+    const nativeHlsSupported = Boolean(element.canPlayType("application/vnd.apple.mpegurl"));
+    const canUseNativeHls = nativeHlsSupported && ("ManagedMediaSource" in window || !Hls.isSupported());
+    if (canUseNativeHls) {
+      element.src = src;
+      element.load();
+      return () => {
+        element.pause();
+        element.removeAttribute("src");
+        element.load();
+      };
+    }
+
+    if (!Hls.isSupported()) {
+      setLoadError("This browser does not support adaptive HLS playback. Update your browser or try a supported device.");
+      return;
+    }
+
+    const hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: false,
+      backBufferLength: 90,
+      manifestLoadingMaxRetry: 3,
+      levelLoadingMaxRetry: 3,
+      fragLoadingMaxRetry: 4,
+    });
+    hls.on(Hls.Events.ERROR, (_event, data) => {
+      if (!data.fatal) return;
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+        hls.startLoad();
+        return;
+      }
+      if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+        hls.recoverMediaError();
+        return;
+      }
+      setLoadError("Adaptive playback stopped unexpectedly. Close and reopen the video to retry.");
+      hls.destroy();
+    });
+    hls.loadSource(src);
+    hls.attachMedia(element);
+    return () => {
+      hls.destroy();
+      element.pause();
+      element.removeAttribute("src");
+      element.load();
+    };
+  }, [src, playbackType]);
+
   const saveWatch = useCallback(async (seconds: number) => {
-    if (!userId || seconds < 1 || seconds - lastSaved.current < 10) return;
+    if (!userId || seconds < 1 || (lastSaved.current > 0 && seconds - lastSaved.current < 10)) return;
     lastSaved.current = seconds;
-    const today = new Date().toISOString().slice(0, 10);
-    await supabase.from("video_views").upsert({
-      video_id: video.id, viewer_id: userId, view_date: today, watch_seconds: seconds,
-      source: video.kind === "short" ? "shorts" : "feed"
-    }, { onConflict: "video_id,viewer_id,view_date" });
+    const { error } = await supabase.rpc("record_video_watch", {
+      p_video_id: video.id,
+      p_watch_seconds: seconds,
+      p_source: video.kind === "short" ? "shorts" : "feed"
+    });
+    if (error) notify("Watch progress was not saved", error.message, "error");
   }, [userId, video.id, video.kind]);
   const addComment = async (event: FormEvent) => {
     event.preventDefault();
@@ -208,7 +276,7 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
       if (error) notify("Could not remove reaction", error.message, "error");
       else { setIsLiked(false); setLikes((n) => Math.max(0, n - 1)); }
     } else {
-      const { error } = await supabase.from("video_reactions").upsert({ video_id: video.id, user_id: userId, reaction: "like" });
+      const { error } = await supabase.from("video_reactions").insert({ video_id: video.id, user_id: userId, reaction: "like" });
       if (error) notify("Could not react", error.message, "error");
       else { setIsLiked(true); setLikes((n) => n + 1); }
     }
@@ -219,7 +287,7 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
     <div className="player-layout">
       <div className="player-main">
         <div className="player-frame">
-          {src ? <video src={src} controls autoPlay playsInline onTimeUpdate={(event) => { const sec = Math.floor(event.currentTarget.currentTime); setWatchSecond(sec); void saveWatch(sec); }} onEnded={() => void saveWatch(watchSecond)} /> :
+          {src ? <video ref={videoElement} src={playbackType === "file" ? src : undefined} controls autoPlay playsInline onTimeUpdate={(event) => { const sec = Math.floor(event.currentTarget.currentTime); setWatchSecond(sec); void saveWatch(sec); }} onEnded={() => void saveWatch(watchSecond)} /> :
             <div className="player-loading">{loadError ? <><ShieldAlert size={28} /><strong>Playback unavailable</strong><p>{loadError}</p></> : <><span className="spinner" /><p>Preparing secure playback…</p></>}</div>}
         </div>
         <h2 className="player-title">{video.title}</h2>
@@ -532,8 +600,108 @@ function PostComposer({ userId, onCreated, notify }: { userId: string; onCreated
   return <form onSubmit={submit} className="post-composer"><textarea value={body} onChange={(event) => setBody(event.target.value)} maxLength={5000} rows={3} placeholder="What’s on your mind? Share a thought, an update, or a behind-the-scenes moment." /><div className="composer-bottom"><span>{body.length}/5000 · Public post</span><button className="btn btn-primary" type="submit" disabled={busy || !body.trim()}>{busy ? "Publishing…" : <><Send size={15} /> Publish post</>}</button></div></form>;
 }
 
-function CommunityCard({ post, onLike, onReport, userId }: { post: PostRow; onLike: () => void; onReport: () => void; userId: string | null }) {
-  return <article className="community-card"><div className="post-head"><Avatar profile={post.creator} /><div><strong>{post.creator?.display_name || "Creator"}</strong><small>{timeAgo(post.created_at)} · Community post</small></div><button className="icon-btn tiny" aria-label="Post actions"><MoreHorizontal size={20} /></button></div><p className="post-body">{post.body}</p>{post.media_urls?.length > 0 && <div className="post-media">{post.media_urls.map((url) => <img key={url} src={url} alt="Post attachment" loading="lazy" />)}</div>}<div className="post-actions"><button onClick={onLike} disabled={!userId} className="post-action"><Heart size={17} /> Like <span>{formatCount(post.likes || 0)}</span></button><span className="post-action passive"><MessageCircle size={17} /> Conversation</span><button className="post-action" onClick={onReport}><ShieldAlert size={15} /> Report</button><button className="post-action" onClick={() => navigator.clipboard?.writeText(window.location.origin + "/community/" + post.id)}><Send size={16} /> Share</button></div></article>;
+function CommunityCard({ post, onLike, onReport, onDiscuss, userId }: { post: PostRow; onLike: () => void; onReport: () => void; onDiscuss: () => void; userId: string | null }) {
+  return <article className="community-card">
+    <div className="post-head"><Avatar profile={post.creator} /><div><strong>{post.creator?.display_name || "Creator"}</strong><small>{timeAgo(post.created_at)} · Community post</small></div><button className="icon-btn tiny" aria-label="Open conversation" title="Open conversation" onClick={onDiscuss}><MessageCircle size={18} /></button></div>
+    <p className="post-body">{post.body}</p>
+    {post.media_urls?.length > 0 && <div className="post-media">{post.media_urls.map((url) => <img key={url} src={url} alt="Post attachment" loading="lazy" />)}</div>}
+    <div className="post-actions">
+      <button onClick={onLike} disabled={!userId} className={"post-action " + (post.likedByMe ? "liked" : "")} aria-pressed={Boolean(post.likedByMe)}><Heart size={17} fill={post.likedByMe ? "currentColor" : "none"} /> {post.likedByMe ? "Liked" : "Like"} <span>{formatCount(post.likes || 0)}</span></button>
+      <button className="post-action" onClick={onDiscuss}><MessageCircle size={17} /> Conversation</button>
+      <button className="post-action" onClick={onReport}><ShieldAlert size={15} /> Report</button>
+      <button className="post-action" onClick={() => { void navigator.clipboard?.writeText(window.location.origin + "/community/" + post.id); }}><Send size={16} /> Share</button>
+    </div>
+  </article>;
+}
+
+function PostDiscussionDialog({ post, userId, profile, onClose, onRequireAuth, notify }: {
+  post: PostRow;
+  userId: string | null;
+  profile: Profile | null;
+  onClose: () => void;
+  onRequireAuth: () => void;
+  notify: (title: string, detail?: string, kind?: Notice["kind"]) => void;
+}) {
+  const [comments, setComments] = useState<PostCommentRow[]>([]);
+  const [body, setBody] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const { data, error } = await supabase.from("comments")
+        .select("id,body,user_id,created_at,parent_comment_id")
+        .eq("post_id", post.id).order("created_at", { ascending: false }).limit(100);
+      if (!active) return;
+      if (error) {
+        setLoading(false);
+        notify("Could not load this conversation", error.message, "error");
+        return;
+      }
+      const rows = (data || []) as PostCommentRow[];
+      const ids = Array.from(new Set(rows.map((item) => item.user_id)));
+      const authors = ids.length
+        ? await supabase.from("profiles").select("id,username,display_name,avatar_url,bio,is_verified").in("id", ids)
+        : { data: [] as any[] };
+      if (!active) return;
+      const profileMap = new Map((authors.data || []).map((person: any) => [person.id, person]));
+      setComments(rows.map((item) => ({ ...item, author: profileMap.get(item.user_id) || null })));
+      setLoading(false);
+    })();
+    return () => { active = false; };
+  }, [post.id, notify]);
+
+  const submitComment = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!userId) { onRequireAuth(); return; }
+    const cleaned = body.trim();
+    if (!cleaned || busy) return;
+    setBusy(true);
+    const { data, error } = await supabase.from("comments")
+      .insert({ post_id: post.id, user_id: userId, body: cleaned })
+      .select("id,body,user_id,created_at,parent_comment_id").single();
+    setBusy(false);
+    if (error || !data) {
+      notify("Comment was not posted", error?.message || "The comment was not saved.", "error");
+      return;
+    }
+    setComments((current) => [{ ...(data as PostCommentRow), author: profile }, ...current]);
+    setBody("");
+    notify("Comment posted.", undefined, "success");
+  };
+
+  const deleteComment = async (comment: PostCommentRow) => {
+    if (!userId || comment.user_id !== userId || !window.confirm("Delete your comment? This cannot be undone.")) return;
+    const { error } = await supabase.from("comments").delete().eq("id", comment.id).eq("user_id", userId);
+    if (error) notify("Comment was not deleted", error.message, "error");
+    else {
+      setComments((current) => current.filter((item) => item.id !== comment.id));
+      notify("Comment deleted.", undefined, "success");
+    }
+  };
+
+  return <Modal onClose={onClose} className="post-discussion-modal">
+    <div className="modal-heading">
+      <div><p className="eyebrow">CREATOR COMMUNITY</p><h2>Conversation</h2><p className="muted">Join the discussion around this post.</p></div>
+      <button className="icon-btn" onClick={onClose} aria-label="Close conversation"><X /></button>
+    </div>
+    <article className="discussion-post-preview">
+      <div className="post-head"><Avatar profile={post.creator} /><div><strong>{post.creator?.display_name || "Creator"}</strong><small>{timeAgo(post.created_at)}</small></div></div>
+      <p className="post-body">{post.body}</p>
+      {post.media_urls?.length > 0 && <div className="post-media">{post.media_urls.map((url) => <img key={url} src={url} alt="Post attachment" loading="lazy" />)}</div>}
+    </article>
+    <div className="discussion-comments-heading"><strong>Replies</strong><span>{comments.length}{comments.length === 100 ? "+" : ""}</span></div>
+    <div className="comment-list discussion-comment-list">
+      {loading ? <div className="comments-empty"><span className="spinner" /><p>Loading conversation…</p></div> :
+        comments.length ? comments.map((comment) => <div className="comment" key={comment.id} style={comment.parent_comment_id ? { marginLeft: 19 } : undefined}>
+          <Avatar profile={comment.author} size="sm" />
+          <div><div className="comment-byline"><strong>{comment.author?.display_name || "Creator"}</strong><span>{timeAgo(comment.created_at)}</span></div><p>{comment.body}</p>{userId === comment.user_id && <button className="post-comment-delete" onClick={() => void deleteComment(comment)}>Delete</button>}</div>
+        </div>) : <div className="comments-empty"><MessageCircle size={22} /><p>No replies yet. Start a thoughtful conversation.</p></div>}
+    </div>
+    {userId ? <form className="comment-form discussion-composer" onSubmit={(event) => void submitComment(event)}><Avatar profile={profile} size="sm" /><input value={body} onChange={(event) => setBody(event.target.value)} maxLength={3000} placeholder="Add a thoughtful comment…" aria-label="Write a comment" /><button type="submit" className="icon-btn" disabled={busy || !body.trim()} aria-label="Post comment">{busy ? <span className="spinner" /> : <Send size={17} />}</button></form> :
+      <div className="discussion-sign-in"><span>Sign in to join the conversation.</span><button className="btn btn-primary" onClick={onRequireAuth}>Sign in</button></div>}
+  </Modal>;
 }
 
 function App() {
@@ -542,18 +710,21 @@ function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [videos, setVideos] = useState<VideoRow[]>([]);
   const [posts, setPosts] = useState<PostRow[]>([]);
+  const [discussionPost, setDiscussionPost] = useState<PostRow | null>(null);
   const [streams, setStreams] = useState<StreamRow[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [query, setQuery] = useState("");
   const [appliedQuery, setAppliedQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreVideos, setHasMoreVideos] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [liveSetup, setLiveSetup] = useState(false);
   const [liveTitle, setLiveTitle] = useState("");
   const [liveDescription, setLiveDescription] = useState("");
   const [selectedVideo, setSelectedVideo] = useState<VideoRow | null>(null);
-  const [routeVideoId] = useState<string | null>(() => window.location.pathname.match(/^\/watch\/([0-9a-f-]{36})$/i)?.[1] || null);
+  const [routeVideoId, setRouteVideoId] = useState<string | null>(() => window.location.pathname.match(/^\/watch\/([0-9a-f-]{36})$/i)?.[1] || null);
   const [routePostId] = useState<string | null>(() => window.location.pathname.match(/^\/community\/([0-9a-f-]{36})$/i)?.[1] || new URLSearchParams(window.location.search).get("post"));
   const [reportTarget, setReportTarget] = useState<{ type: "video" | "post"; id: string } | null>(null);
   const [room, setRoom] = useState<{ stream: StreamRow; token: string; broadcaster: boolean } | null>(null);
@@ -566,6 +737,8 @@ function App() {
   const [editingVideo, setEditingVideo] = useState<VideoRow | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const livekitUrl = (import.meta.env.VITE_LIVEKIT_URL as string | undefined) || "";
+  const videosRequestId = useRef(0);
+  const loadingMoreRef = useRef(false);
 
   const notify = useCallback((title: string, detail?: string, kind: Notice["kind"] = "info") => {
     setNotice({ id: crypto.randomUUID(), title, detail, kind });
@@ -579,6 +752,16 @@ function App() {
       if (mounted) setUser(session?.user || null);
     });
     return () => { mounted = false; data.subscription.unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    const syncWatchLocation = () => {
+      const nextId = window.location.pathname.match(/^\/watch\/([0-9a-f-]{36})$/i)?.[1] || null;
+      setRouteVideoId(nextId);
+      setSelectedVideo((current) => current?.id === nextId ? current : null);
+    };
+    window.addEventListener("popstate", syncWatchLocation);
+    return () => window.removeEventListener("popstate", syncWatchLocation);
   }, []);
 
   useEffect(() => {
@@ -646,13 +829,20 @@ function App() {
   }, [routePostId]);
 
   const loadVideos = useCallback(async () => {
-    if (!isSupabaseConfigured) { setLoading(false); return; }
+    const requestId = ++videosRequestId.current;
+    loadingMoreRef.current = false;
+    setLoadingMore(false);
+    setHasMoreVideos(false);
+    if (!isSupabaseConfigured) { setVideos([]); setLoading(false); return; }
     setLoading(true);
     let request = supabase.from("videos").select("id,creator_id,title,description,video_path,thumbnail_path,duration_seconds,visibility,kind,status,category,views_count,published_at,created_at,video_reactions(count),comments(count)")
       .eq("status", "published").eq("visibility", "public");
     if (section === "shorts") request = request.eq("kind", "short") as typeof request;
     if (section === "subscriptions") {
-      if (!user?.id || followingIds.length === 0) { setVideos([]); setLoading(false); return; }
+      if (!user?.id || followingIds.length === 0) {
+        if (requestId === videosRequestId.current) { setVideos([]); setLoading(false); }
+        return;
+      }
       request = request.in("creator_id", followingIds) as typeof request;
     }
     if (appliedQuery.trim()) {
@@ -661,20 +851,68 @@ function App() {
     }
     if (section === "trending") request = request.order("views_count", { ascending: false }).order("published_at", { ascending: false }) as typeof request;
     else request = request.order("published_at", { ascending: false }) as typeof request;
-    const { data, error } = await request.limit(section === "shorts" ? 36 : 36);
-    if (error) { setVideos([]); notify("Could not load videos", error.message, "error"); setLoading(false); return; }
-    const rows = (data || []) as unknown as VideoRow[];
+    const { data, error } = await request.range(0, WEB_FEED_PAGE_SIZE);
+    if (requestId !== videosRequestId.current) return;
+    if (error) {
+      setVideos([]);
+      notify("Could not load videos", error.message, "error");
+      setLoading(false);
+      return;
+    }
+    const fetchedRows = (data || []) as unknown as VideoRow[];
+    const hasMore = fetchedRows.length > WEB_FEED_PAGE_SIZE;
+    const rows = fetchedRows.slice(0, WEB_FEED_PAGE_SIZE);
     const ids = Array.from(new Set(rows.map((row) => row.creator_id)));
     const prof = ids.length ? await supabase.from("profiles").select("id,username,display_name,avatar_url,bio,is_verified").in("id", ids) : { data: [] as any[] };
+    if (requestId !== videosRequestId.current) return;
     const profileMap = new Map((prof.data || []).map((person: any) => [person.id, person]));
-    if (activeRef.current) {
-      setVideos(rows.map((row) => ({ ...row, creator: profileMap.get(row.creator_id) })));
-      setLoading(false);
-    }
+    setVideos(rows.map((row) => ({ ...row, creator: profileMap.get(row.creator_id) })));
+    setHasMoreVideos(hasMore);
+    setLoading(false);
   }, [section, appliedQuery, user?.id, followingIds, notify]);
 
-  const activeRef = useRef(true);
-  useEffect(() => { activeRef.current = true; void loadVideos(); return () => { activeRef.current = false; }; }, [loadVideos]);
+  const loadMoreVideos = useCallback(async () => {
+    if (loadingMoreRef.current || loading || !hasMoreVideos || section === "library" ||
+        !["home", "trending", "shorts", "subscriptions"].includes(section)) return;
+    const requestId = videosRequestId.current;
+    const offset = videos.length;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    let request = supabase.from("videos").select("id,creator_id,title,description,video_path,thumbnail_path,duration_seconds,visibility,kind,status,category,views_count,published_at,created_at,video_reactions(count),comments(count)")
+      .eq("status", "published").eq("visibility", "public");
+    if (section === "shorts") request = request.eq("kind", "short") as typeof request;
+    if (section === "subscriptions") request = request.in("creator_id", followingIds) as typeof request;
+    if (appliedQuery.trim()) {
+      const safe = appliedQuery.trim().replace(/[,%()]/g, " ").replace(/\s+/g, " ").slice(0, 100);
+      if (safe) request = request.or("title.ilike.%" + safe + "%,description.ilike.%" + safe + "%") as typeof request;
+    }
+    if (section === "trending") request = request.order("views_count", { ascending: false }).order("published_at", { ascending: false }) as typeof request;
+    else request = request.order("published_at", { ascending: false }) as typeof request;
+    const { data, error } = await request.range(offset, offset + WEB_FEED_PAGE_SIZE);
+    if (requestId !== videosRequestId.current) return;
+    if (error) {
+      notify("Could not load more videos", error.message, "error");
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+      return;
+    }
+    const fetchedRows = (data || []) as unknown as VideoRow[];
+    const hasMore = fetchedRows.length > WEB_FEED_PAGE_SIZE;
+    const rows = fetchedRows.slice(0, WEB_FEED_PAGE_SIZE);
+    const ids = Array.from(new Set(rows.map((row) => row.creator_id)));
+    const prof = ids.length ? await supabase.from("profiles").select("id,username,display_name,avatar_url,bio,is_verified").in("id", ids) : { data: [] as any[] };
+    if (requestId !== videosRequestId.current) return;
+    const profileMap = new Map((prof.data || []).map((person: any) => [person.id, person]));
+    setVideos((current) => {
+      const existingIds = new Set(current.map((row) => row.id));
+      return [...current, ...rows.filter((row) => !existingIds.has(row.id)).map((row) => ({ ...row, creator: profileMap.get(row.creator_id) }))];
+    });
+    setHasMoreVideos(hasMore);
+    loadingMoreRef.current = false;
+    setLoadingMore(false);
+  }, [section, appliedQuery, followingIds, videos.length, hasMoreVideos, loading, notify]);
+
+  useEffect(() => { void loadVideos(); }, [loadVideos]);
 
   const loadStudioVideos = useCallback(async () => {
     if (section !== "studio" || !user?.id) {
@@ -683,7 +921,7 @@ function App() {
     }
     setStudioLoading(true);
     const { data, error } = await supabase.from("videos")
-      .select("id,creator_id,title,description,video_path,thumbnail_path,duration_seconds,visibility,kind,status,category,views_count,published_at,created_at,allow_comments")
+      .select("id,creator_id,title,description,video_path,thumbnail_path,duration_seconds,visibility,kind,status,media_status,playback_manifest_path,category,views_count,published_at,created_at,allow_comments")
       .eq("creator_id", user.id).order("created_at", { ascending: false }).limit(100);
     if (error) {
       notify("Could not load your uploads", error.message, "error");
@@ -704,15 +942,30 @@ function App() {
       if (target.data) rows = [target.data as unknown as PostRow, ...rows];
     }
     const ids = Array.from(new Set(rows.map((row) => row.creator_id)));
+    const postIds = rows.map((row) => row.id);
     const [prof, reactions] = await Promise.all([
       ids.length ? supabase.from("profiles").select("id,username,display_name,avatar_url,bio,is_verified").in("id", ids) : Promise.resolve({ data: [] as any[] }),
-      supabase.from("post_reactions").select("post_id")
+      postIds.length ? supabase.from("post_reactions").select("post_id,user_id").in("post_id", postIds) : Promise.resolve({ data: [] as any[] })
     ]);
     const profileMap = new Map((prof.data || []).map((person: any) => [person.id, person]));
     const counts = new Map<string, number>();
-    (reactions.data || []).forEach((reaction: any) => counts.set(reaction.post_id, (counts.get(reaction.post_id) || 0) + 1));
-    setPosts(rows.map((row) => ({ ...row, creator: profileMap.get(row.creator_id), likes: counts.get(row.id) || 0 })));
-  }, [section, notify, routePostId]);
+    const likedByUser = new Set<string>();
+    (reactions.data || []).forEach((reaction: any) => {
+      counts.set(reaction.post_id, (counts.get(reaction.post_id) || 0) + 1);
+      if (user?.id && reaction.user_id === user.id) likedByUser.add(reaction.post_id);
+    });
+    const hydratedPosts = rows.map((row) => ({
+      ...row,
+      creator: profileMap.get(row.creator_id),
+      likes: counts.get(row.id) || 0,
+      likedByMe: likedByUser.has(row.id)
+    }));
+    setPosts(hydratedPosts);
+    if (routePostId) {
+      const targetPost = hydratedPosts.find((row) => row.id === routePostId);
+      if (targetPost) setDiscussionPost(targetPost);
+    }
+  }, [section, notify, routePostId, user?.id]);
 
   const loadStreams = useCallback(async () => {
     if (section !== "live") return;
@@ -749,26 +1002,53 @@ function App() {
 
   useEffect(() => { void loadPosts(); void loadStreams(); void loadLibrary(); void loadNotifications(); void loadStudioVideos(); }, [loadPosts, loadStreams, loadLibrary, loadNotifications, loadStudioVideos]);
 
-  const openVideo = (video: VideoRow) => setSelectedVideo(video);
+  const openVideo = (video: VideoRow) => {
+    const nextPath = "/watch/" + video.id;
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({ ...(window.history.state || {}), omnitubeWatch: true }, "", nextPath);
+    }
+    setRouteVideoId(video.id);
+    setSelectedVideo(video);
+  };
+  const closeVideo = () => {
+    const state = window.history.state as { omnitubeWatch?: boolean } | null;
+    if (routeVideoId && state?.omnitubeWatch && window.location.pathname === "/watch/" + routeVideoId) {
+      window.history.back();
+      return;
+    }
+    if (routeVideoId) {
+      window.history.replaceState({}, "", "/");
+      setRouteVideoId(null);
+    }
+    setSelectedVideo(null);
+  };
   const requestReport = (type: "video" | "post", id: string) => {
     if (!user?.id) { setAuthOpen(true); return; }
     setReportTarget({ type, id });
   };
   const deleteVideo = async (video: VideoRow) => {
     if (!user?.id || !window.confirm("Permanently delete “" + video.title + "”? This also removes its comments, reactions and playlist references.")) return;
-    const { error } = await supabase.from("videos").delete().eq("id", video.id).eq("creator_id", user.id);
-    if (error) { notify("Video was not deleted", error.message, "error"); return; }
-    const objects = await Promise.all([
-      supabase.storage.from("omnitube-videos").remove([video.video_path]),
-      video.thumbnail_path ? supabase.storage.from("omnitube-thumbnails").remove([video.thumbnail_path]) : Promise.resolve({ error: null })
-    ]);
+    const { data, error } = await supabase.functions.invoke("delete-video", { body: { videoId: video.id } });
+    if (error || !data?.success) {
+      notify("Video deletion is not complete", error?.message || data?.error || "The server could not confirm media cleanup. Retry deletion from Creator Studio.", "error");
+      return;
+    }
     setMyVideos((all) => all.filter((item) => item.id !== video.id));
     setVideos((all) => all.filter((item) => item.id !== video.id));
     setLibraryVideos((all) => all.filter((item) => item.id !== video.id));
     if (selectedVideo?.id === video.id) setSelectedVideo(null);
-    if (objects.some((result) => result.error)) {
-      notify("Video record deleted", "The record is gone, but one media object could not be removed. Review storage for orphaned files.", "error");
-    } else notify("Video deleted.", undefined, "success");
+    notify("Video and media files deleted.", undefined, "success");
+  };
+
+  const retryMediaProcessing = async (video: VideoRow) => {
+    if (!user?.id || video.media_status !== "failed") return;
+    const { data, error } = await supabase.functions.invoke("retry-media-processing", { body: { videoId: video.id } });
+    if (error || !data?.success) {
+      notify("Media processing retry failed", error?.message || data?.error || "The server could not queue this retry.", "error");
+      return;
+    }
+    notify("Media processing queued", "OmniTube will rebuild the adaptive playback files from your existing upload.", "success");
+    await loadStudioVideos();
   };
 
   const signOut = async () => {
@@ -813,15 +1093,26 @@ function App() {
       if (created.error) { notify("Could not create Watch later", created.error.message, "error"); return; }
       list = created.data;
     }
-    const { error: itemError } = await supabase.from("playlist_items").upsert({ playlist_id: list.id, video_id: video.id, position: 0 }, { onConflict: "playlist_id,video_id" });
-    if (itemError) notify("Could not save video", itemError.message, "error");
+    const { data: existingItem, error: lookupError } = await supabase.from("playlist_items")
+      .select("video_id").eq("playlist_id", list.id).eq("video_id", video.id).maybeSingle();
+    if (lookupError) { notify("Could not check Watch later", lookupError.message, "error"); return; }
+    if (existingItem) { notify("Already saved", "This video is already in Watch later."); return; }
+    const { error: itemError } = await supabase.from("playlist_items")
+      .insert({ playlist_id: list.id, video_id: video.id, position: 0 });
+    if (itemError?.code === "23505") notify("Already saved", "This video is already in Watch later.");
+    else if (itemError) notify("Could not save video", itemError.message, "error");
     else { notify("Saved to Watch later.", undefined, "success"); if (section === "library") void loadLibrary(); }
   };
 
   const repostVideo = async (video: VideoRow) => {
     if (!user?.id) { setAuthOpen(true); return; }
-    const { error } = await supabase.from("reposts").upsert({ video_id: video.id, user_id: user.id }, { onConflict: "video_id,user_id" });
-    if (error) notify("Could not repost video", error.message, "error");
+    const { data: existing, error: lookupError } = await supabase.from("reposts")
+      .select("id").eq("video_id", video.id).eq("user_id", user.id).maybeSingle();
+    if (lookupError) { notify("Could not check your repost", lookupError.message, "error"); return; }
+    if (existing) { notify("Already reposted", "This video is already in your repost history."); return; }
+    const { error } = await supabase.from("reposts").insert({ video_id: video.id, user_id: user.id });
+    if (error?.code === "23505") notify("Already reposted", "This video is already in your repost history.");
+    else if (error) notify("Could not repost video", error.message, "error");
     else notify("Reposted to your network.", undefined, "success");
   };
 
@@ -868,9 +1159,21 @@ function App() {
 
   const createPostReaction = async (post: PostRow) => {
     if (!user?.id) { setAuthOpen(true); return; }
-    const { error } = await supabase.from("post_reactions").upsert({ post_id: post.id, user_id: user.id, reaction: "like" }, { onConflict: "post_id,user_id" });
-    if (error) notify("Could not react to post", error.message, "error");
-    else { setPosts((all) => all.map((item) => item.id === post.id ? { ...item, likes: Number(item.likes || 0) + 1 } : item)); notify("Post liked.", undefined, "success"); }
+    const { data: existing, error: lookupError } = await supabase.from("post_reactions")
+      .select("reaction").eq("post_id", post.id).eq("user_id", user.id).maybeSingle();
+    if (lookupError) { notify("Could not check your reaction", lookupError.message, "error"); return; }
+    const result = existing
+      ? await supabase.from("post_reactions").delete().eq("post_id", post.id).eq("user_id", user.id)
+      : await supabase.from("post_reactions").insert({ post_id: post.id, user_id: user.id, reaction: "like" });
+    if (result.error) notify("Could not react to post", result.error.message, "error");
+    else {
+      setPosts((all) => all.map((item) => item.id === post.id ? {
+        ...item,
+        likes: Math.max(0, Number(item.likes || 0) + (existing ? -1 : 1)),
+        likedByMe: !existing
+      } : item));
+      notify(existing ? "Like removed." : "Post liked.", undefined, "success");
+    }
   };
 
   const markNotificationRead = async (id: string) => {
@@ -931,7 +1234,8 @@ function App() {
           <div className="studio-library-panel"><div className="studio-library-heading"><div><p className="eyebrow">YOUR CONTENT</p><h3>Manage your uploads</h3></div><span>{myVideos.length} {myVideos.length === 1 ? "video" : "videos"}</span></div>
             {studioLoading ? <div className="studio-library-loading"><span className="spinner" /> Loading your library…</div> : myVideos.map((item) => <article className="studio-video-row" key={item.id}>
               <ThumbnailPreview path={item.thumbnail_path} />
-              <div className="studio-video-copy"><strong>{item.title}</strong><span>{item.status.toUpperCase()} · {item.visibility} · {item.kind === "short" ? "Short" : "Video"}</span><small>{formatCount(item.views_count)} views · {timeAgo(item.published_at || item.created_at)}</small></div>
+              <div className="studio-video-copy"><strong>{item.title}</strong><span>{item.status.toUpperCase()} · {item.media_status === "ready" ? "ADAPTIVE PLAYBACK READY" : item.media_status.toUpperCase()} · {item.visibility} · {item.kind === "short" ? "Short" : "Video"}</span><small>{formatCount(item.views_count)} views · {timeAgo(item.published_at || item.created_at)}</small></div>
+              {item.status === "published" && item.media_status === "failed" && <button className="btn btn-quiet studio-video-edit" onClick={() => void retryMediaProcessing(item)}><ArrowDownUp size={14} /> Retry media</button>}
               <button className="btn btn-quiet studio-video-edit" onClick={() => setEditingVideo(item)} disabled={item.status === "failed"}><Settings size={14} /> Edit</button>
               <button className="icon-btn studio-video-delete" onClick={() => void deleteVideo(item)} aria-label={"Delete " + item.title} title="Delete video"><X size={16} /></button>
             </article>)}
@@ -942,7 +1246,7 @@ function App() {
         {section === "posts" && user && <PostComposer userId={user.id} notify={notify} onCreated={() => void loadPosts()} />}
         {section === "posts" && !user && <div className="join-community"><div className="join-community-icon"><MessageCircle size={20} /></div><div><strong>Join the conversation.</strong><p>Sign in to share a post or react to creators.</p></div><button className="btn btn-primary" onClick={() => setAuthOpen(true)}>Sign in</button></div>}
 
-        {section === "posts" && <div className="community-feed">{posts.map((post) => <CommunityCard key={post.id} post={post} userId={user?.id || null} onLike={() => void createPostReaction(post)} onReport={() => requestReport("post", post.id)} />)}{posts.length === 0 && <EmptyState icon={MessageCircle} title="Your community starts here." detail="No public posts are available yet. Create the first update and give people something to talk about." action={user ? <button className="btn btn-primary" onClick={() => document.querySelector<HTMLTextAreaElement>(".post-composer textarea")?.focus()}><Plus size={15} /> Write a post</button> : undefined} />}</div>}
+        {section === "posts" && <div className="community-feed">{posts.map((post) => <CommunityCard key={post.id} post={post} userId={user?.id || null} onLike={() => void createPostReaction(post)} onReport={() => requestReport("post", post.id)} onDiscuss={() => setDiscussionPost(post)} />)}{posts.length === 0 && <EmptyState icon={MessageCircle} title="Your community starts here." detail="No public posts are available yet. Create the first update and give people something to talk about." action={user ? <button className="btn btn-primary" onClick={() => document.querySelector<HTMLTextAreaElement>(".post-composer textarea")?.focus()}><Plus size={15} /> Write a post</button> : undefined} />}</div>}
 
         {section === "live" && <><div className="live-hero"><div className="live-hero-copy"><span className="live-pill"><span className="live-dot" /> LIVE EXPERIENCE</span><h3>Meet them <span>in real time.</span></h3><p>Live video and realtime chat, powered by an authenticated low-latency room.</p></div><button className="btn btn-primary" onClick={() => { if (!user) setAuthOpen(true); else setLiveSetup(true); }}><Radio size={16} /> Go live</button></div>
           <div className="live-list-heading"><h3>Live & scheduled</h3><span>{streams.filter((item) => item.status === "live").length} live</span></div>
@@ -954,7 +1258,7 @@ function App() {
 
         {(section === "home" || section === "trending" || section === "shorts" || section === "subscriptions" || section === "library") && !needsLoginForCurrentSection && <>{section === "shorts" && <div className="shorts-intro"><Clapperboard size={17} /><span>Quick stories from creators. Tap any short to watch in the full player.</span></div>}
           {loading ? <div className="loading-grid">{Array.from({ length: section === "shorts" ? 6 : 8 }, (_, i) => <div className="video-skeleton" key={i}><div /><span /><small /></div>)}</div> :
-            contentVideos.length > 0 ? <div className={"video-grid " + (section === "shorts" ? "shorts-grid" : "")}>{contentVideos.map((video) => <VideoCard key={video.id} video={video} onPlay={() => openVideo(video)} onLike={() => void likeVideo(video)} onSave={() => void saveVideo(video)} onRepost={() => void repostVideo(video)} user={Boolean(user)} following={followingIds.includes(video.creator_id)} onFollow={() => void toggleFollow(video.creator_id)} onReport={() => requestReport("video", video.id)} />)}</div> :
+            contentVideos.length > 0 ? <><div className={"video-grid " + (section === "shorts" ? "shorts-grid" : "")}>{contentVideos.map((video) => <VideoCard key={video.id} video={video} onPlay={() => openVideo(video)} onLike={() => void likeVideo(video)} onSave={() => void saveVideo(video)} onRepost={() => void repostVideo(video)} user={Boolean(user)} following={followingIds.includes(video.creator_id)} onFollow={() => void toggleFollow(video.creator_id)} onReport={() => requestReport("video", video.id)} />)}</div>{section !== "library" && hasMoreVideos && <div className="feed-pagination"><button className="btn btn-quiet" onClick={() => void loadMoreVideos()} disabled={loadingMore || loading}>{loadingMore ? <><span className="spinner" /> Loading more…</> : <>Load more videos <ArrowDownUp size={15} /></>}</button><span>{contentVideos.length} videos loaded</span></div>}</> :
               <EmptyState icon={section === "shorts" ? Clapperboard : section === "library" ? Library : section === "subscriptions" ? Users : section === "trending" ? TrendingUp : Search} title={section === "library" ? "Your Watch later list is empty." : section === "subscriptions" ? "Your following feed is ready for its first creator." : appliedQuery ? "No videos match this search." : section === "shorts" ? "No shorts published yet." : section === "trending" ? "Nothing trending just yet." : "A universe ready to be discovered."} detail={section === "library" ? "Save videos from the action menu to keep them close." : section === "subscriptions" ? "Find creators and follow them to make this space yours." : appliedQuery ? "Try another title, topic, or creator keyword." : section === "shorts" ? "Shorts from real creators will appear here when published." : "Publish the first video to begin filling your real discovery feed."} action={section !== "library" && section !== "subscriptions" ? <button className="btn btn-primary" onClick={() => { if (!user) setAuthOpen(true); else setUploadOpen(true); }}><Upload size={15} /> Upload first video</button> : undefined} />}
         </>}
 
@@ -965,9 +1269,10 @@ function App() {
     {sidebarOpen && <button className="mobile-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" />}
     {authOpen && <AuthDialog onClose={() => setAuthOpen(false)} notify={notify} />}
     {reportTarget && user?.id && <ReportDialog targetType={reportTarget.type} targetId={reportTarget.id} userId={user.id} onClose={() => setReportTarget(null)} notify={notify} />}
+    {discussionPost && <PostDiscussionDialog post={discussionPost} userId={user?.id || null} profile={profile} onClose={() => setDiscussionPost(null)} onRequireAuth={() => { setDiscussionPost(null); setAuthOpen(true); }} notify={notify} />}
     {editingVideo && user?.id && <EditVideoDialog video={editingVideo} userId={user.id} onClose={() => setEditingVideo(null)} onUpdated={() => { void loadStudioVideos(); void loadVideos(); }} notify={notify} />}
     {uploadOpen && user?.id && <UploadDialog userId={user.id} notify={notify} onClose={() => setUploadOpen(false)} onPublished={() => { void loadVideos(); if (section === "studio") void loadStudioVideos(); }} />}
-    {selectedVideo && <VideoPlayer key={selectedVideo.id} video={selectedVideo} profile={profile} onClose={() => setSelectedVideo(null)} notify={notify} userId={user?.id || null} />}
+    {selectedVideo && <VideoPlayer key={selectedVideo.id} video={selectedVideo} profile={profile} onClose={closeVideo} notify={notify} userId={user?.id || null} />}
     {liveSetup && <Modal onClose={() => { if (!uploadBusy) setLiveSetup(false); }} className="live-setup-modal"><div className="modal-heading"><div><p className="eyebrow">ON-AIR STUDIO</p><h2>Start a live broadcast.</h2><p className="muted">An authorized LiveKit room will be created for your creator identity.</p></div><button className="icon-btn" onClick={() => setLiveSetup(false)}><X /></button></div><form className="stack-form" onSubmit={(event) => void publishLive(event)}><label htmlFor="stream-title">Stream title</label><input id="stream-title" value={liveTitle} onChange={(event) => setLiveTitle(event.target.value)} required maxLength={180} placeholder="What are we getting into today?" /><label htmlFor="stream-description">Description</label><textarea id="stream-description" value={liveDescription} onChange={(event) => setLiveDescription(event.target.value)} rows={3} maxLength={3000} placeholder="Tell viewers what this live session is about." /><div className="provider-info"><Radio size={17} /><div><strong>LiveKit realtime media</strong><span>Requires VITE_LIVEKIT_URL and server-only LIVEKIT_API_KEY / LIVEKIT_API_SECRET in Supabase Edge Function secrets.</span></div></div><div className="modal-footer"><button type="button" className="btn btn-quiet" onClick={() => setLiveSetup(false)} disabled={uploadBusy}>Cancel</button><button type="submit" className="btn btn-primary" disabled={uploadBusy || !liveTitle.trim()}>{uploadBusy ? <><span className="spinner" /> Starting…</> : <><Radio size={16} /> Start broadcast</>}</button></div></form></Modal>}
     {room && livekitUrl && <LiveRoomPane key={room.stream.id} stream={room.stream} token={room.token} serverUrl={livekitUrl} broadcaster={room.broadcaster} userId={user?.id || ""} profile={profile} onClose={() => void endRoom()} notify={notify} />}
     {notice && <div className={"toast toast-" + (notice.kind || "info")} role="status"><span className="toast-icon">{notice.kind === "success" ? <Check size={17} /> : notice.kind === "error" ? <ShieldAlert size={17} /> : <Sparkles size={17} />}</span><div><strong>{notice.title}</strong>{notice.detail && <p>{notice.detail}</p>}</div><button className="icon-btn tiny" onClick={() => setNotice(null)} aria-label="Dismiss notification"><X size={16} /></button></div>}

@@ -32,9 +32,11 @@ export default function WatchScreen() {
 
   const persistWatchTime = useCallback(async () => {
     if (!video?.id || !user?.id || !watchTrackingReady || watchedSeconds.current <= 0) return;
-    const { error } = await supabase.from("video_views").update({
-      watch_seconds: watchBaseSeconds.current + watchedSeconds.current,
-    }).eq("video_id", video.id).eq("viewer_id", user.id).eq("view_date", watchDate.current);
+    const { error } = await supabase.rpc("record_video_watch", {
+      p_video_id: video.id,
+      p_watch_seconds: watchBaseSeconds.current + watchedSeconds.current,
+      p_source: "direct",
+    });
     if (error && __DEV__) console.warn("OmniTube watch-time update unavailable:", error.message);
   }, [video?.id, user?.id, watchTrackingReady]);
 
@@ -87,8 +89,11 @@ export default function WatchScreen() {
         const nextVideo = { ...(data as VideoRow), creator: creator as Profile | null };
         setVideo(nextVideo);
         try {
-          const url = await resolvePlayback(id);
-          if (active) await player.replaceAsync({ uri: url });
+          const source = await resolvePlayback(id);
+          if (active) await player.replaceAsync({
+            uri: source.url,
+            contentType: source.type === "hls" ? "hls" : "auto",
+          });
           if (active) { player.play(); setPlaybackError(""); }
         } catch (error) {
           if (active) setPlaybackError(error instanceof Error ? error.message : "Playback could not be authorized.");
@@ -106,15 +111,11 @@ export default function WatchScreen() {
         if (user && !viewRecorded.current) {
           viewRecorded.current = true;
           const today = watchDate.current;
-          const { data: priorView } = await supabase.from("video_views").select("watch_seconds")
-            .eq("video_id", id).eq("viewer_id", user.id).eq("view_date", today).maybeSingle();
-          if (!priorView) {
-            const { error: insertViewError } = await supabase.from("video_views").insert({
-              video_id: id, viewer_id: user.id, view_date: today, watch_seconds: 0, source: "direct",
-            });
-            if (insertViewError && insertViewError.code !== "23505" && __DEV__) {
-              console.warn("OmniTube view event could not be recorded:", insertViewError.message);
-            }
+          const { error: startTrackingError } = await supabase.rpc("record_video_watch", {
+            p_video_id: id, p_watch_seconds: 0, p_source: "direct",
+          });
+          if (startTrackingError && __DEV__) {
+            console.warn("OmniTube watch tracking could not start:", startTrackingError.message);
           }
           const { data: currentView } = await supabase.from("video_views").select("watch_seconds")
             .eq("video_id", id).eq("viewer_id", user.id).eq("view_date", today).maybeSingle();
@@ -139,7 +140,7 @@ export default function WatchScreen() {
     setLiked(!wasLiked); setLikeCount((old) => Math.max(0, old + (wasLiked ? -1 : 1)));
     const result = wasLiked
       ? await supabase.from("video_reactions").delete().eq("video_id", video.id).eq("user_id", user.id)
-      : await supabase.from("video_reactions").upsert({ video_id: video.id, user_id: user.id, reaction: "like" });
+      : await supabase.from("video_reactions").insert({ video_id: video.id, user_id: user.id, reaction: "like" });
     if (result.error) { setLiked(wasLiked); setLikeCount((old) => Math.max(0, old + (wasLiked ? 1 : -1))); Alert.alert("Like was not saved", result.error.message); }
   };
 
@@ -163,13 +164,21 @@ export default function WatchScreen() {
       if (result.error) { Alert.alert("Could not create playlist", result.error.message); return; }
       playlist = result.data;
     }
-    const { error } = await supabase.from("playlist_items").upsert({ playlist_id: playlist.id, video_id: video.id, position: 0 }, { onConflict: "playlist_id,video_id" });
+    const { data: existingItem, error: lookupError } = await supabase.from("playlist_items")
+      .select("video_id").eq("playlist_id", playlist.id).eq("video_id", video.id).maybeSingle();
+    if (lookupError) { Alert.alert("Could not check saved video", lookupError.message); return; }
+    if (existingItem) { Alert.alert("Already saved", "This video is already in Watch later."); return; }
+    const { error } = await supabase.from("playlist_items").insert({ playlist_id: playlist.id, video_id: video.id, position: 0 });
     Alert.alert(error ? "Could not save video" : "Saved to Watch later", error?.message || "Added to your private library.");
   };
 
   const repost = async () => {
     if (!video || !user) { Alert.alert("Sign in to repost", "Reposts help creators reach more people."); return; }
-    const { error } = await supabase.from("reposts").upsert({ video_id: video.id, user_id: user.id }, { onConflict: "video_id,user_id" });
+    const { data: existing, error: lookupError } = await supabase.from("reposts")
+      .select("id").eq("video_id", video.id).eq("user_id", user.id).maybeSingle();
+    if (lookupError) { Alert.alert("Could not check repost", lookupError.message); return; }
+    if (existing) { Alert.alert("Already reposted", "This video is already in your repost history."); return; }
+    const { error } = await supabase.from("reposts").insert({ video_id: video.id, user_id: user.id });
     Alert.alert(error ? "Could not repost" : "Reposted", error?.message || "Shared with your creator network.");
   };
 

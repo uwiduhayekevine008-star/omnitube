@@ -9,6 +9,7 @@ export type PostRow = Database["public"]["Tables"]["posts"]["Row"] & {
   creator?: Profile | null;
   likesCount?: number;
   commentsCount?: number;
+  likedByMe?: boolean;
 };
 export type LiveStreamRow = Database["public"]["Tables"]["live_streams"]["Row"] & {
   creator?: Profile | null;
