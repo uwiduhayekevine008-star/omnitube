@@ -1025,8 +1025,13 @@ function App() {
 
   const repostVideo = async (video: VideoRow) => {
     if (!user?.id) { setAuthOpen(true); return; }
-    const { error } = await supabase.from("reposts").upsert({ video_id: video.id, user_id: user.id }, { onConflict: "video_id,user_id" });
-    if (error) notify("Could not repost video", error.message, "error");
+    const { data: existing, error: lookupError } = await supabase.from("reposts")
+      .select("id").eq("video_id", video.id).eq("user_id", user.id).maybeSingle();
+    if (lookupError) { notify("Could not check your repost", lookupError.message, "error"); return; }
+    if (existing) { notify("Already reposted", "This video is already in your repost history."); return; }
+    const { error } = await supabase.from("reposts").insert({ video_id: video.id, user_id: user.id });
+    if (error?.code === "23505") notify("Already reposted", "This video is already in your repost history.");
+    else if (error) notify("Could not repost video", error.message, "error");
     else notify("Reposted to your network.", undefined, "success");
   };
 
