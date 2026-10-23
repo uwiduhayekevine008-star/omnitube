@@ -190,9 +190,9 @@ async function assertJobLease(admin, job) {
     throw new MediaJobCancelledError("The media-processing lease was cancelled or reassigned");
   }
   const { data: video, error: videoError } = await admin.from("videos")
-    .select("status").eq("id", job.video_id).maybeSingle();
+    .select("status,media_status").eq("id", job.video_id).maybeSingle();
   if (videoError) throw new Error("Could not verify video state before media processing");
-  if (!video || video.status !== "published") {
+  if (!video || video.status !== "published" || video.media_status !== "processing") {
     throw new MediaJobCancelledError("The video was removed or unpublished during processing");
   }
 }
@@ -367,39 +367,20 @@ async function heartbeat(admin, jobId) {
 }
 
 async function recoverExpiredLeases(admin) {
-  const cutoff = new Date(Date.now() - leaseMs).toISOString();
-  await admin.from("media_processing_jobs").update({
-    status: "pending", locked_at: null, locked_by: null, available_at: new Date().toISOString(),
-    last_error: "Worker lease expired; the job was safely re-queued.", updated_at: new Date().toISOString(),
-  }).eq("status", "processing").lt("locked_at", cutoff);
+  const { error } = await admin.rpc("recover_expired_media_processing_jobs", {
+    p_lease_ms: leaseMs,
+  });
+  if (error) throw new Error(`Expired media lease recovery failed: ${error.message}`);
 }
 
 async function claimNextJob(admin) {
-  const now = new Date().toISOString();
-  const { data: candidates, error } = await admin.from("media_processing_jobs")
-    .select("id,video_id,attempts")
-    .eq("status", "pending")
-    .lte("available_at", now)
-    .order("available_at", { ascending: true })
-    .order("created_at", { ascending: true })
-    .limit(1);
-  if (error) throw new Error(`Queue read failed: ${error.message}`);
-  const job = candidates?.[0];
-  if (!job) return null;
-  const { data: claimed, error: claimError } = await admin.from("media_processing_jobs")
-    .update({
-      status: "processing",
-      attempts: job.attempts + 1,
-      locked_at: now,
-      locked_by: workerId,
-      updated_at: now,
-    })
-    .eq("id", job.id)
-    .eq("status", "pending")
-    .select("id,video_id,attempts")
-    .maybeSingle();
-  if (claimError) throw new Error(`Queue claim failed: ${claimError.message}`);
-  return claimed || null;
+  const { data, error } = await admin.rpc("claim_media_processing_job", {
+    p_worker_id: workerId,
+    p_lease_ms: leaseMs,
+  });
+  if (error) throw new Error(`Atomic media job claim failed: ${error.message}`);
+  const job = Array.isArray(data) ? data[0] : null;
+  return job || null;
 }
 
 async function handleFailure(admin, job, error) {
