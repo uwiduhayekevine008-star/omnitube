@@ -751,7 +751,7 @@ function App() {
     if (error) { notify("Video was not deleted", error.message, "error"); return; }
     const objects = await Promise.all([
       supabase.storage.from("omnitube-videos").remove([video.video_path]),
-      video.thumbnail_path ? supabase.storage.from("omnitube-assets").remove([video.thumbnail_path]) : Promise.resolve({ error: null })
+      video.thumbnail_path ? supabase.storage.from("omnitube-thumbnails").remove([video.thumbnail_path]) : Promise.resolve({ error: null })
     ]);
     setMyVideos((all) => all.filter((item) => item.id !== video.id));
     setVideos((all) => all.filter((item) => item.id !== video.id));
