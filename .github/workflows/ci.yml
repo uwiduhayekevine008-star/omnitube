@@ -23,6 +23,25 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
 
+  supabase-db-verify:
+    name: Supabase · Apply and lint all migrations locally
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: Start local Supabase services
+        run: supabase start -x studio,imgproxy,inbucket,logflare,vector
+      - name: Apply the complete migration chain
+        run: supabase db reset --local
+      - name: Lint migrated database security and performance
+        run: supabase db lint --local --schema public,omnitube_private
+      - name: Stop local Supabase services
+        if: always()
+        run: supabase stop --no-backup
+
   media-worker-verify:
     name: Media worker · Syntax and unit tests
     runs-on: ubuntu-latest
