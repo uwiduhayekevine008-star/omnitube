@@ -1,9 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
+import type { Database } from "./database.types";
 const env = import.meta.env as ImportMetaEnv;
 export const supabaseUrl = env.VITE_SUPABASE_URL || "";
 export const supabasePublishableKey = env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
 export const isSupabaseConfigured = Boolean(supabaseUrl.startsWith("https://") && supabasePublishableKey.startsWith("sb_publishable_"));
-export const supabase = createClient(
+export const supabase = createClient<Database>(
   supabaseUrl || "https://configuration-required.invalid",
   supabasePublishableKey || "configuration-required",
   { auth: { autoRefreshToken: true, persistSession: true, detectSessionInUrl: true, flowType: "pkce" },
