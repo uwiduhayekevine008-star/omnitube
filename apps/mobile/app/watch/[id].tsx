@@ -23,12 +23,22 @@ export default function WatchScreen() {
   const [commentBody, setCommentBody] = useState("");
   const [commenting, setCommenting] = useState(false);
   const [showAllComments, setShowAllComments] = useState(false);
-  const player = useVideoPlayer(null, (instance) => { instance.loop = false; instance.muted = false; });
+  const player = useVideoPlayer(null, (instance) => { instance.loop = false; instance.muted = false; instance.timeUpdateEventInterval = 1; instance.keepScreenOnWhilePlaying = true; });
   const viewRecorded = useRef(false);
   const watchBaseSeconds = useRef(0);
   const watchedSeconds = useRef(0);
   const watchDate = useRef(new Date().toISOString().slice(0, 10));
   const [watchTrackingReady, setWatchTrackingReady] = useState(false);
+  const [playbackAttempt, setPlaybackAttempt] = useState(0);
+  const [playbackType, setPlaybackType] = useState<"hls" | "file">("file");
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [qualityCap, setQualityCap] = useState<"auto" | "360" | "720" | "1080">("auto");
+  const [subtitleOptions, setSubtitleOptions] = useState<Array<{ label: string; index: number }>>([]);
+  const [selectedSubtitle, setSelectedSubtitle] = useState(-1);
+  const [hasAdaptiveTracks, setHasAdaptiveTracks] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [durationSeconds, setDurationSeconds] = useState(0);
+  const [bufferedPosition, setBufferedPosition] = useState(0);
 
   const persistWatchTime = useCallback(async () => {
     if (!video?.id || !user?.id || !watchTrackingReady || watchedSeconds.current <= 0) return;
@@ -80,6 +90,10 @@ export default function WatchScreen() {
     watchDate.current = new Date().toISOString().slice(0, 10);
     void (async () => {
       setLoading(true);
+      setPlaybackError("");
+      setSubtitleOptions([]);
+      setSelectedSubtitle(-1);
+      setQualityCap("auto");
       try {
         const { data, error } = await supabase.from("videos").select("*").eq("id", id).maybeSingle();
         if (error) throw error;
@@ -90,11 +104,17 @@ export default function WatchScreen() {
         setVideo(nextVideo);
         try {
           const source = await resolvePlayback(id);
-          if (active) await player.replaceAsync({
-            uri: source.url,
-            contentType: source.type === "hls" ? "hls" : "auto",
-          });
-          if (active) { player.play(); setPlaybackError(""); }
+          if (active) {
+            setPlaybackType(source.type);
+            await player.replaceAsync({
+              uri: source.url,
+              contentType: source.type === "hls" ? "hls" : "auto",
+            });
+            player.playbackRate = playbackRate;
+            player.maxResolution = null;
+            player.play();
+            setPlaybackError("");
+          }
         } catch (error) {
           if (active) setPlaybackError(error instanceof Error ? error.message : "Playback could not be authorized.");
         }
@@ -131,7 +151,78 @@ export default function WatchScreen() {
       } finally { if (active) setLoading(false); }
     })();
     return () => { active = false; player.pause(); };
-  }, [id, user?.id, player, loadComments]);
+  }, [id, user?.id, player, loadComments, playbackAttempt, playbackRate]);
+
+  useEffect(() => {
+    const sourceSub = player.addListener("sourceLoad", (payload) => {
+      setDurationSeconds(Number(payload.duration || 0));
+      setSubtitleOptions(payload.availableSubtitleTracks.map((track, index) => ({
+        label: track.label || track.language || `Subtitles ${index + 1}`,
+        index,
+      })));
+      setSelectedSubtitle(-1);
+      setHasAdaptiveTracks(payload.availableVideoTracks.length > 1);
+    });
+    const subtitleSub = player.addListener("availableSubtitleTracksChange", ({ availableSubtitleTracks }) => {
+      setSubtitleOptions(availableSubtitleTracks.map((track, index) => ({
+        label: track.label || track.language || `Subtitles ${index + 1}`,
+        index,
+      })));
+    });
+    const videoSub = player.addListener("availableVideoTracksChange", ({ availableVideoTracks }) => {
+      setHasAdaptiveTracks(availableVideoTracks.length > 1);
+    });
+    const timeSub = player.addListener("timeUpdate", ({ currentTime: position, bufferedPosition: buffered }) => {
+      setCurrentTime(position);
+      setDurationSeconds(Number.isFinite(player.duration) ? player.duration : 0);
+      setBufferedPosition(Number.isFinite(buffered) && buffered > 0 ? buffered : 0);
+    });
+    const rateSub = player.addListener("playbackRateChange", ({ playbackRate: rate }) => setPlaybackRate(rate));
+    return () => {
+      sourceSub.remove();
+      subtitleSub.remove();
+      videoSub.remove();
+      timeSub.remove();
+      rateSub.remove();
+    };
+  }, [player]);
+
+  useEffect(() => {
+    player.playbackRate = playbackRate;
+  }, [player, playbackRate]);
+
+  useEffect(() => {
+    if (playbackType !== "hls") {
+      player.maxResolution = null;
+      return;
+    }
+    const portrait = video?.kind === "short";
+    const caps = {
+      "360": portrait ? { width: 360, height: 640 } : { width: 640, height: 360 },
+      "720": portrait ? { width: 720, height: 1280 } : { width: 1280, height: 720 },
+      "1080": portrait ? { width: 1080, height: 1920 } : { width: 1920, height: 1080 },
+    } as const;
+    player.maxResolution = qualityCap === "auto" ? null : caps[qualityCap];
+  }, [player, playbackType, qualityCap, video?.kind]);
+
+  const selectSubtitle = (index: number) => {
+    const tracks = player.availableSubtitleTracks;
+    player.subtitleTrack = index < 0 ? null : (tracks[index] || null);
+    setSelectedSubtitle(index);
+  };
+
+  const seekBy = (seconds: number) => {
+    player.seekBy(seconds);
+  };
+
+  const formatPlayerTime = (seconds: number) => {
+    if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+    const total = Math.floor(seconds);
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    return hours ? `${hours}:${String(minutes).padStart(2, "0")}:${String(secs).padStart(2, "0")}` : `${minutes}:${String(secs).padStart(2, "0")}`;
+  };
 
   const toggleLike = async () => {
     if (!video) return;
@@ -217,8 +308,37 @@ export default function WatchScreen() {
     <View style={styles.topbar}><Pressable onPress={() => router.back()} style={styles.back}><Ionicons name="arrow-back" size={20} color={theme.text}/></Pressable><Brand/><Pressable onPress={reportVideo} style={styles.more}><Ionicons name="shield-outline" size={20} color={theme.muted}/></Pressable></View>
     <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
       <View style={styles.player}>
-        {video && !playbackError ? <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="contain" nativeControls allowsPictureInPicture /> : <View style={styles.playerFallback}><Ionicons name={playbackError ? "alert-circle-outline" : "play-circle-outline"} size={35} color={theme.violet}/><Text style={styles.playerErrorText}>{playbackError || "Preparing your video…"}</Text>{loading ? <ActivityIndicator color={theme.mint}/> : null}</View>}
+        {video && !playbackError ? <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="contain" nativeControls allowsPictureInPicture /> : <View style={styles.playerFallback}><Ionicons name={playbackError ? "alert-circle-outline" : "play-circle-outline"} size={35} color={theme.violet}/><Text style={styles.playerErrorText}>{playbackError || "Preparing your video…"}</Text>{loading ? <ActivityIndicator color={theme.mint}/> : null}{playbackError && !loading ? <Pressable style={styles.retryButton} onPress={() => setPlaybackAttempt((value) => value + 1)}><Ionicons name="refresh" size={15} color={theme.text}/><Text style={styles.retryButtonText}>Retry secure playback</Text></Pressable> : null}</View>}
       </View>
+      {video && !playbackError && <View style={styles.playerTools}>
+        <View style={styles.playerToolHeader}>
+          <Text style={styles.playerToolTitle}>PLAYBACK</Text>
+          <Text style={styles.playerTime}>{formatPlayerTime(currentTime)} / {formatPlayerTime(durationSeconds || video.duration_seconds || 0)}</Text>
+        </View>
+        <View style={styles.playerProgress}><View style={[styles.playerBuffered,{width: `${durationSeconds > 0 ? Math.min(100, bufferedPosition / durationSeconds * 100) : 0}%`]}/><View style={[styles.playerProgressFill,{width: `${durationSeconds > 0 ? Math.min(100, currentTime / durationSeconds * 100) : 0}%`]}/></View>
+        <View style={styles.playerControlRow}>
+          <Pressable onPress={() => seekBy(-10)} style={styles.playerControlButton} accessibilityRole="button" accessibilityLabel="Back 10 seconds"><Ionicons name="play-back" size={15} color={theme.text}/><Text style={styles.playerControlLabel}>10s</Text></Pressable>
+          <Pressable onPress={() => seekBy(10)} style={styles.playerControlButton} accessibilityRole="button" accessibilityLabel="Forward 10 seconds"><Ionicons name="play-forward" size={15} color={theme.text}/><Text style={styles.playerControlLabel}>10s</Text></Pressable>
+          <View style={styles.playerControlSpacer}/>
+          <Text style={styles.playerSettingLabel}>SPEED</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.playerSettingChips}>
+            {[0.5,0.75,1,1.25,1.5,2].map((rate) => <Pressable key={rate} onPress={() => setPlaybackRate(rate)} style={[styles.playerSettingChip, playbackRate === rate && styles.playerSettingChipActive]}><Text style={[styles.playerSettingChipText, playbackRate === rate && styles.playerSettingChipTextActive]}>{rate === 1 ? "1×" : `${rate}×`}</Text></Pressable>)}
+          </ScrollView>
+        </View>
+        {playbackType === "hls" && hasAdaptiveTracks ? <View style={styles.playerControlRow}>
+          <Text style={styles.playerSettingLabel}>QUALITY</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.playerSettingChips}>
+            {(["auto","360","720","1080"] as const).map((quality) => <Pressable key={quality} onPress={() => setQualityCap(quality)} style={[styles.playerSettingChip, qualityCap === quality && styles.playerSettingChipActive]}><Text style={[styles.playerSettingChipText, qualityCap === quality && styles.playerSettingChipTextActive]}>{quality === "auto" ? "Auto" : quality + "p max"}</Text></Pressable>)}
+          </ScrollView>
+        </View> : null}
+        {subtitleOptions.length > 0 ? <View style={styles.playerControlRow}>
+          <Text style={styles.playerSettingLabel}>CAPTIONS</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.playerSettingChips}>
+            <Pressable onPress={() => selectSubtitle(-1)} style={[styles.playerSettingChip, selectedSubtitle === -1 && styles.playerSettingChipActive]}><Text style={[styles.playerSettingChipText, selectedSubtitle === -1 && styles.playerSettingChipTextActive]}>Off</Text></Pressable>
+            {subtitleOptions.map((track) => <Pressable key={track.index} onPress={() => selectSubtitle(track.index)} style={[styles.playerSettingChip, selectedSubtitle === track.index && styles.playerSettingChipActive]}><Text style={[styles.playerSettingChipText, selectedSubtitle === track.index && styles.playerSettingChipTextActive]}>{track.label}</Text></Pressable>)}
+          </ScrollView>
+        </View> : null}
+      </View>}
       {loading && !video ? <ActivityIndicator color={theme.mint} style={{ marginTop: 24 }}/> : video ? <>
         <View style={styles.videoMeta}><Text style={styles.videoTitle}>{video.title}</Text><Text style={styles.videoStats}>{formatCount(video.views_count)} views · {timeAgo(video.published_at || video.created_at)} · {video.category}</Text></View>
         <Surface style={styles.creatorCard}>
@@ -251,6 +371,25 @@ const styles = StyleSheet.create({
   player: { width: "100%", aspectRatio: 16 / 9, borderRadius: 14, overflow: "hidden", backgroundColor: "#030408", borderWidth: 1, borderColor: theme.line },
   playerFallback: { flex: 1, alignItems: "center", justifyContent: "center", padding: 20, gap: 10 },
   playerErrorText: { color: theme.muted, fontSize: 11, textAlign: "center", lineHeight: 17 },
+  retryButton: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7, minHeight: 38, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1, borderColor: theme.line, backgroundColor: theme.panel2 },
+  retryButtonText: { color: theme.text, fontSize: 10, fontWeight: "800" },
+  playerTools: { marginTop: 9, padding: 11, gap: 10, borderRadius: 13, borderWidth: 1, borderColor: theme.line, backgroundColor: theme.panel },
+  playerToolHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  playerToolTitle: { color: theme.muted, fontSize: 8, letterSpacing: 1.1, fontWeight: "900" },
+  playerTime: { color: theme.muted, fontSize: 9, fontVariant: ["tabular-nums"] },
+  playerProgress: { height: 4, overflow: "hidden", borderRadius: 5, backgroundColor: theme.panel3 },
+  playerBuffered: { position: "absolute", left: 0, top: 0, bottom: 0, backgroundColor: "#3A465E" },
+  playerProgressFill: { height: 4, borderRadius: 5, backgroundColor: theme.mint },
+  playerControlRow: { flexDirection: "row", alignItems: "center", gap: 7, flexWrap: "wrap" },
+  playerControlButton: { minHeight: 33, paddingHorizontal: 9, gap: 4, borderRadius: 8, borderWidth: 1, borderColor: theme.line, alignItems: "center", justifyContent: "center", flexDirection: "row", backgroundColor: theme.panel2 },
+  playerControlLabel: { color: theme.text, fontSize: 8, fontWeight: "900" },
+  playerControlSpacer: { flex: 1, minWidth: 5 },
+  playerSettingLabel: { color: theme.subtle, fontSize: 8, fontWeight: "900", letterSpacing: 0.7 },
+  playerSettingChips: { flexDirection: "row", alignItems: "center", gap: 5 },
+  playerSettingChip: { minHeight: 30, paddingHorizontal: 9, justifyContent: "center", borderRadius: 8, borderWidth: 1, borderColor: theme.line, backgroundColor: theme.panel2 },
+  playerSettingChipActive: { borderColor: theme.mint, backgroundColor: theme.mintDark },
+  playerSettingChipText: { color: theme.muted, fontSize: 9, fontWeight: "800" },
+  playerSettingChipTextActive: { color: theme.mint },
   videoMeta: { paddingTop: 17, paddingBottom: 13 },
   videoTitle: { color: theme.text, fontSize: 20, lineHeight: 26, letterSpacing: -0.5, fontWeight: "900" },
   videoStats: { color: theme.muted, fontSize: 10, marginTop: 7 },
