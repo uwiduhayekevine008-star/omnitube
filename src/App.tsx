@@ -97,9 +97,9 @@ function Modal({ children, onClose, className = "" }: { children: ReactNode; onC
   </div>;
 }
 
-function VideoCard({ video, onPlay, onLike, onSave, onRepost, user, following, onFollow }: {
+function VideoCard({ video, onPlay, onLike, onSave, onRepost, user, following, onFollow, onReport }: {
   video: VideoRow; onPlay: () => void; onLike: () => void; onSave: () => void; onRepost: () => void;
-  user: boolean; following: boolean; onFollow: () => void;
+  user: boolean; following: boolean; onFollow: () => void; onReport: () => void;
 }) {
   const [menu, setMenu] = useState(false);
   const thumbnail = storagePublicUrl(video.thumbnail_path);
@@ -125,6 +125,7 @@ function VideoCard({ video, onPlay, onLike, onSave, onRepost, user, following, o
           <button onClick={() => { onLike(); setMenu(false); }}><ThumbsUp size={16} /> Like video</button>
           <button onClick={() => { onRepost(); setMenu(false); }}><Repeat2 size={16} /> Repost</button>
           <button onClick={() => { navigator.clipboard?.writeText(window.location.origin + "/watch/" + video.id); setMenu(false); }}><Send size={16} /> Copy link</button>
+          <button onClick={() => { onReport(); setMenu(false); }}><ShieldAlert size={16} /> Report video</button>
         </div>}
       </div>
     </div>
@@ -429,6 +430,39 @@ function LiveRoomPane({ stream, token, serverUrl, broadcaster, userId, profile, 
   </Modal>;
 }
 
+function ReportDialog({ targetType, targetId, userId, onClose, notify }: {
+  targetType: "video" | "post"; targetId: string; userId: string; onClose: () => void;
+  notify: (title: string, detail?: string, kind?: Notice["kind"]) => void;
+}) {
+  const [reason, setReason] = useState("spam");
+  const [details, setDetails] = useState("");
+  const [busy, setBusy] = useState(false);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    setBusy(true);
+    const { error } = await supabase.from("reports").insert({
+      reporter_id: userId, target_type: targetType, target_id: targetId,
+      reason, details: details.trim()
+    });
+    setBusy(false);
+    if (error) notify("Report could not be submitted", error.message, "error");
+    else { notify("Report received", "Thank you. Your report has been recorded for review.", "success"); onClose(); }
+  };
+  return <Modal onClose={onClose} className="report-modal">
+    <div className="modal-heading"><div><p className="eyebrow">COMMUNITY SAFETY</p><h2>Report this {targetType === "video" ? "video" : "post"}.</h2><p className="muted">Tell us what looks wrong. Reports are private and tied to your account.</p></div><button className="icon-btn" onClick={onClose} aria-label="Close report form"><X /></button></div>
+    <form className="stack-form" onSubmit={(event) => void submit(event)}>
+      <label htmlFor="report-reason">Reason for report</label>
+      <select id="report-reason" value={reason} onChange={(event) => setReason(event.target.value)} required>
+        <option value="spam">Spam or scams</option><option value="harassment">Harassment or bullying</option><option value="hate">Hateful or abusive content</option><option value="violence">Violence or dangerous acts</option><option value="sexual_content">Sexual content</option><option value="copyright">Copyright concern</option><option value="misinformation">Misleading or harmful misinformation</option><option value="other">Something else</option>
+      </select>
+      <label htmlFor="report-details">Details (optional)</label>
+      <textarea id="report-details" rows={4} maxLength={2000} value={details} onChange={(event) => setDetails(event.target.value)} placeholder="Add context that would help a reviewer understand the concern." />
+      <div className="modal-footer"><button type="button" className="btn btn-quiet" onClick={onClose} disabled={busy}>Cancel</button><button type="submit" className="btn btn-danger" disabled={busy}><ShieldAlert size={15} /> {busy ? "Submitting…" : "Submit report"}</button></div>
+    </form>
+  </Modal>;
+}
+
 function PostComposer({ userId, onCreated, notify }: { userId: string; onCreated: () => void; notify: (title: string, detail?: string, kind?: Notice["kind"]) => void }) {
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
@@ -443,8 +477,8 @@ function PostComposer({ userId, onCreated, notify }: { userId: string; onCreated
   return <form onSubmit={submit} className="post-composer"><textarea value={body} onChange={(event) => setBody(event.target.value)} maxLength={5000} rows={3} placeholder="What’s on your mind? Share a thought, an update, or a behind-the-scenes moment." /><div className="composer-bottom"><span>{body.length}/5000 · Public post</span><button className="btn btn-primary" type="submit" disabled={busy || !body.trim()}>{busy ? "Publishing…" : <><Send size={15} /> Publish post</>}</button></div></form>;
 }
 
-function CommunityCard({ post, onLike, userId }: { post: PostRow; onLike: () => void; userId: string | null }) {
-  return <article className="community-card"><div className="post-head"><Avatar profile={post.creator} /><div><strong>{post.creator?.display_name || "Creator"}</strong><small>{timeAgo(post.created_at)} · Community post</small></div><button className="icon-btn tiny" aria-label="Post actions"><MoreHorizontal size={20} /></button></div><p className="post-body">{post.body}</p>{post.media_urls?.length > 0 && <div className="post-media">{post.media_urls.map((url) => <img key={url} src={url} alt="Post attachment" loading="lazy" />)}</div>}<div className="post-actions"><button onClick={onLike} disabled={!userId} className="post-action"><Heart size={17} /> Like <span>{formatCount(post.likes || 0)}</span></button><span className="post-action passive"><MessageCircle size={17} /> Conversation</span><button className="post-action" onClick={() => navigator.clipboard?.writeText(window.location.origin + "/community/" + post.id)}><Send size={16} /> Share</button></div></article>;
+function CommunityCard({ post, onLike, onReport, userId }: { post: PostRow; onLike: () => void; onReport: () => void; userId: string | null }) {
+  return <article className="community-card"><div className="post-head"><Avatar profile={post.creator} /><div><strong>{post.creator?.display_name || "Creator"}</strong><small>{timeAgo(post.created_at)} · Community post</small></div><button className="icon-btn tiny" aria-label="Post actions"><MoreHorizontal size={20} /></button></div><p className="post-body">{post.body}</p>{post.media_urls?.length > 0 && <div className="post-media">{post.media_urls.map((url) => <img key={url} src={url} alt="Post attachment" loading="lazy" />)}</div>}<div className="post-actions"><button onClick={onLike} disabled={!userId} className="post-action"><Heart size={17} /> Like <span>{formatCount(post.likes || 0)}</span></button><span className="post-action passive"><MessageCircle size={17} /> Conversation</span><button className="post-action" onClick={onReport}><ShieldAlert size={15} /> Report</button><button className="post-action" onClick={() => navigator.clipboard?.writeText(window.location.origin + "/community/" + post.id)}><Send size={16} /> Share</button></div></article>;
 }
 
 function App() {
@@ -464,6 +498,7 @@ function App() {
   const [liveTitle, setLiveTitle] = useState("");
   const [liveDescription, setLiveDescription] = useState("");
   const [selectedVideo, setSelectedVideo] = useState<VideoRow | null>(null);
+  const [reportTarget, setReportTarget] = useState<{ type: "video" | "post"; id: string } | null>(null);
   const [room, setRoom] = useState<{ stream: StreamRow; token: string; broadcaster: boolean } | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -583,6 +618,10 @@ function App() {
   useEffect(() => { void loadPosts(); void loadStreams(); void loadLibrary(); void loadNotifications(); }, [loadPosts, loadStreams, loadLibrary, loadNotifications]);
 
   const openVideo = (video: VideoRow) => setSelectedVideo(video);
+  const requestReport = (type: "video" | "post", id: string) => {
+    if (!user?.id) { setAuthOpen(true); return; }
+    setReportTarget({ type, id });
+  };
   const toggleFollow = async (creatorId: string) => {
     if (!user?.id) { setAuthOpen(true); return; }
     if (creatorId === user.id) { setSection("studio"); return; }
@@ -739,7 +778,7 @@ function App() {
         {section === "posts" && user && <PostComposer userId={user.id} notify={notify} onCreated={() => void loadPosts()} />}
         {section === "posts" && !user && <div className="join-community"><div className="join-community-icon"><MessageCircle size={20} /></div><div><strong>Join the conversation.</strong><p>Sign in to share a post or react to creators.</p></div><button className="btn btn-primary" onClick={() => setAuthOpen(true)}>Sign in</button></div>}
 
-        {section === "posts" && <div className="community-feed">{posts.map((post) => <CommunityCard key={post.id} post={post} userId={user?.id || null} onLike={() => void createPostReaction(post)} />)}{posts.length === 0 && <EmptyState icon={MessageCircle} title="Your community starts here." detail="No public posts are available yet. Create the first update and give people something to talk about." action={user ? <button className="btn btn-primary" onClick={() => document.querySelector<HTMLTextAreaElement>(".post-composer textarea")?.focus()}><Plus size={15} /> Write a post</button> : undefined} />}</div>}
+        {section === "posts" && <div className="community-feed">{posts.map((post) => <CommunityCard key={post.id} post={post} userId={user?.id || null} onLike={() => void createPostReaction(post)} onReport={() => requestReport("post", post.id)} />)}{posts.length === 0 && <EmptyState icon={MessageCircle} title="Your community starts here." detail="No public posts are available yet. Create the first update and give people something to talk about." action={user ? <button className="btn btn-primary" onClick={() => document.querySelector<HTMLTextAreaElement>(".post-composer textarea")?.focus()}><Plus size={15} /> Write a post</button> : undefined} />}</div>}
 
         {section === "live" && <><div className="live-hero"><div className="live-hero-copy"><span className="live-pill"><span className="live-dot" /> LIVE EXPERIENCE</span><h3>Meet them <span>in real time.</span></h3><p>Live video and realtime chat, powered by an authenticated low-latency room.</p></div><button className="btn btn-primary" onClick={() => { if (!user) setAuthOpen(true); else setLiveSetup(true); }}><Radio size={16} /> Go live</button></div>
           <div className="live-list-heading"><h3>Live & scheduled</h3><span>{streams.filter((item) => item.status === "live").length} live</span></div>
@@ -751,7 +790,7 @@ function App() {
 
         {(section === "home" || section === "trending" || section === "shorts" || section === "subscriptions" || section === "library") && !needsLoginForCurrentSection && <>{section === "shorts" && <div className="shorts-intro"><Clapperboard size={17} /><span>Quick stories from creators. Tap any short to watch in the full player.</span></div>}
           {loading ? <div className="loading-grid">{Array.from({ length: section === "shorts" ? 6 : 8 }, (_, i) => <div className="video-skeleton" key={i}><div /><span /><small /></div>)}</div> :
-            contentVideos.length > 0 ? <div className={"video-grid " + (section === "shorts" ? "shorts-grid" : "")}>{contentVideos.map((video) => <VideoCard key={video.id} video={video} onPlay={() => openVideo(video)} onLike={() => void likeVideo(video)} onSave={() => void saveVideo(video)} onRepost={() => void repostVideo(video)} user={Boolean(user)} following={followingIds.includes(video.creator_id)} onFollow={() => void toggleFollow(video.creator_id)} />)}</div> :
+            contentVideos.length > 0 ? <div className={"video-grid " + (section === "shorts" ? "shorts-grid" : "")}>{contentVideos.map((video) => <VideoCard key={video.id} video={video} onPlay={() => openVideo(video)} onLike={() => void likeVideo(video)} onSave={() => void saveVideo(video)} onRepost={() => void repostVideo(video)} user={Boolean(user)} following={followingIds.includes(video.creator_id)} onFollow={() => void toggleFollow(video.creator_id)} onReport={() => requestReport("video", video.id)} />)}</div> :
               <EmptyState icon={section === "shorts" ? Clapperboard : section === "library" ? Library : section === "subscriptions" ? Users : section === "trending" ? TrendingUp : Search} title={section === "library" ? "Your Watch later list is empty." : section === "subscriptions" ? "Your following feed is ready for its first creator." : appliedQuery ? "No videos match this search." : section === "shorts" ? "No shorts published yet." : section === "trending" ? "Nothing trending just yet." : "A universe ready to be discovered."} detail={section === "library" ? "Save videos from the action menu to keep them close." : section === "subscriptions" ? "Find creators and follow them to make this space yours." : appliedQuery ? "Try another title, topic, or creator keyword." : section === "shorts" ? "Shorts from real creators will appear here when published." : "Publish the first video to begin filling your real discovery feed."} action={section !== "library" && section !== "subscriptions" ? <button className="btn btn-primary" onClick={() => { if (!user) setAuthOpen(true); else setUploadOpen(true); }}><Upload size={15} /> Upload first video</button> : undefined} />}
         </>}
 
@@ -761,6 +800,7 @@ function App() {
 
     {sidebarOpen && <button className="mobile-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" />}
     {authOpen && <AuthDialog onClose={() => setAuthOpen(false)} notify={notify} />}
+    {reportTarget && user?.id && <ReportDialog targetType={reportTarget.type} targetId={reportTarget.id} userId={user.id} onClose={() => setReportTarget(null)} notify={notify} />}
     {uploadOpen && user?.id && <UploadDialog userId={user.id} notify={notify} onClose={() => setUploadOpen(false)} onPublished={() => { void loadVideos(); if (section === "studio") void loadVideos(); }} />}
     {selectedVideo && <VideoPlayer key={selectedVideo.id} video={selectedVideo} profile={profile} onClose={() => setSelectedVideo(null)} notify={notify} userId={user?.id || null} />}
     {liveSetup && <Modal onClose={() => { if (!uploadBusy) setLiveSetup(false); }} className="live-setup-modal"><div className="modal-heading"><div><p className="eyebrow">ON-AIR STUDIO</p><h2>Start a live broadcast.</h2><p className="muted">An authorized LiveKit room will be created for your creator identity.</p></div><button className="icon-btn" onClick={() => setLiveSetup(false)}><X /></button></div><form className="stack-form" onSubmit={(event) => void publishLive(event)}><label htmlFor="stream-title">Stream title</label><input id="stream-title" value={liveTitle} onChange={(event) => setLiveTitle(event.target.value)} required maxLength={180} placeholder="What are we getting into today?" /><label htmlFor="stream-description">Description</label><textarea id="stream-description" value={liveDescription} onChange={(event) => setLiveDescription(event.target.value)} rows={3} maxLength={3000} placeholder="Tell viewers what this live session is about." /><div className="provider-info"><Radio size={17} /><div><strong>LiveKit realtime media</strong><span>Requires VITE_LIVEKIT_URL and server-only LIVEKIT_API_KEY / LIVEKIT_API_SECRET in Supabase Edge Function secrets.</span></div></div><div className="modal-footer"><button type="button" className="btn btn-quiet" onClick={() => setLiveSetup(false)} disabled={uploadBusy}>Cancel</button><button type="submit" className="btn btn-primary" disabled={uploadBusy || !liveTitle.trim()}>{uploadBusy ? <><span className="spinner" /> Starting…</> : <><Radio size={16} /> Start broadcast</>}</button></div></form></Modal>}
