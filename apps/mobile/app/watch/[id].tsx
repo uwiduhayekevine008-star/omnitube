@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, Share, StyleSheet, Text, TextInput, View } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { VideoView, useVideoPlayer } from "expo-video";
@@ -23,8 +23,7 @@ export default function WatchScreen() {
   const [commentBody, setCommentBody] = useState("");
   const [commenting, setCommenting] = useState(false);
   const [showAllComments, setShowAllComments] = useState(false);
-  const player = useVideoPlayer(null, (instance) => { instance.loop = false; instance.muted = false; });
-  const viewRecorded = useRef(false);
+  const player = useVideoPlayer(null, (instance) => { instance.loop = false; instance.muted = false; instance.timeUpdateEventInterval = 10; });
 
   const loadComments = useCallback(async () => {
     if (!id) return;
@@ -41,7 +40,6 @@ export default function WatchScreen() {
 
   useEffect(() => {
     let active = true;
-    viewRecorded.current = false;
     void (async () => {
       setLoading(true);
       try {
@@ -72,13 +70,6 @@ export default function WatchScreen() {
           setLiked(userReaction.data?.reaction === "like" || userReaction.data?.reaction === "heart");
           setFollowing(Boolean(followState.data));
         }
-        if (user && !viewRecorded.current) {
-          viewRecorded.current = true;
-          const { error: watchError } = await supabase.rpc("record_video_watch", {
-            p_video_id: id, p_watch_seconds: 1, p_source: "direct"
-          });
-          if (watchError) console.warn("Watch activity could not be recorded", watchError.message);
-        }
         await loadComments();
       } catch (error) {
         if (active) setPlaybackError(error instanceof Error ? error.message : "This video is not available.");
@@ -86,6 +77,24 @@ export default function WatchScreen() {
     })();
     return () => { active = false; player.pause(); };
   }, [id, user?.id, player, loadComments]);
+
+  useEffect(() => {
+    if (!id || !user?.id) return;
+    let lastRecordedSecond = 0;
+    const subscription = player.addListener("timeUpdate", ({ currentTime }) => {
+      const second = Math.floor(currentTime);
+      if (second < 1 || second - lastRecordedSecond < 10) return;
+      lastRecordedSecond = second;
+      void supabase.rpc("record_video_watch", {
+        p_video_id: id,
+        p_watch_seconds: second,
+        p_source: "direct",
+      }).then(({ error }) => {
+        if (error) console.warn("Watch progress could not be saved", error.message);
+      });
+    });
+    return () => subscription.remove();
+  }, [id, player, user?.id]);
 
   const toggleLike = async () => {
     if (!video) return;
