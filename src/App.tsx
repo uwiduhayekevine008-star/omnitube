@@ -1093,8 +1093,14 @@ function App() {
       if (created.error) { notify("Could not create Watch later", created.error.message, "error"); return; }
       list = created.data;
     }
-    const { error: itemError } = await supabase.from("playlist_items").upsert({ playlist_id: list.id, video_id: video.id, position: 0 }, { onConflict: "playlist_id,video_id" });
-    if (itemError) notify("Could not save video", itemError.message, "error");
+    const { data: existingItem, error: lookupError } = await supabase.from("playlist_items")
+      .select("video_id").eq("playlist_id", list.id).eq("video_id", video.id).maybeSingle();
+    if (lookupError) { notify("Could not check Watch later", lookupError.message, "error"); return; }
+    if (existingItem) { notify("Already saved", "This video is already in Watch later."); return; }
+    const { error: itemError } = await supabase.from("playlist_items")
+      .insert({ playlist_id: list.id, video_id: video.id, position: 0 });
+    if (itemError?.code === "23505") notify("Already saved", "This video is already in Watch later.");
+    else if (itemError) notify("Could not save video", itemError.message, "error");
     else { notify("Saved to Watch later.", undefined, "success"); if (section === "library") void loadLibrary(); }
   };
 
