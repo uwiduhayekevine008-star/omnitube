@@ -44,6 +44,21 @@ function initials(profile?: Profile | null) {
 function avatarStyle(profile?: Profile | null) {
   return profile?.avatar_url ? { backgroundImage: "url(" + profile.avatar_url + ")" } : undefined;
 }
+function useSignedThumbnail(path: string | null | undefined) {
+  const [url, setUrl] = useState("");
+  useEffect(() => {
+    let active = true;
+    if (!path) { setUrl(""); return () => { active = false; }; }
+    void supabase.storage.from("omnitube-thumbnails").createSignedUrl(path, 3600)
+      .then(({ data, error }) => { if (active) setUrl(error ? "" : data.signedUrl); });
+    return () => { active = false; };
+  }, [path]);
+  return url;
+}
+function ThumbnailPreview({ path }: { path: string | null }) {
+  const url = useSignedThumbnail(path);
+  return <div className="studio-video-thumb" style={url ? { backgroundImage: "url(" + url + ")" } : undefined}><VideoIcon size={18} /></div>;
+}
 function useEscape(onClose: () => void) {
   useEffect(() => {
     const handler = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
