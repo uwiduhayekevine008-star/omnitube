@@ -21,6 +21,14 @@ export default function ProfileScreen() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [videos, setVideos] = useState<VideoRow[]>([]);
   const [savedVideos, setSavedVideos] = useState<VideoRow[]>([]);
+  const [editingVideo, setEditingVideo] = useState<VideoRow | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editVisibility, setEditVisibility] = useState<"public" | "unlisted" | "private">("public");
+  const [editCategory, setEditCategory] = useState("Other");
+  const [editKind, setEditKind] = useState<"video" | "short">("video");
+  const [editComments, setEditComments] = useState(true);
+  const [savingVideo, setSavingVideo] = useState(false);
   const [stats, setStats] = useState({ videos: 0, followers: 0, following: 0, views: 0 });
   const [pageLoading, setPageLoading] = useState(false);
 
@@ -68,6 +76,56 @@ export default function ProfileScreen() {
     } finally { setSendingLink(false); }
   };
 
+  const beginVideoEdit = (video: VideoRow) => {
+    setEditingVideo(video);
+    setEditTitle(video.title);
+    setEditDescription(video.description || "");
+    setEditVisibility(video.visibility as "public" | "unlisted" | "private");
+    setEditCategory(video.category || "Other");
+    setEditKind(video.kind as "video" | "short");
+    setEditComments(video.allow_comments !== false);
+  };
+
+  const saveVideoEdit = async () => {
+    if (!user || !editingVideo || savingVideo) return;
+    if (!editTitle.trim()) { Alert.alert("A title is required", "Give your video a title before saving."); return; }
+    setSavingVideo(true);
+    const { data, error } = await supabase.from("videos").update({
+      title: editTitle.trim(), description: editDescription.trim(), visibility: editVisibility,
+      category: editCategory, kind: editKind, allow_comments: editComments,
+      updated_at: new Date().toISOString(),
+    }).eq("id", editingVideo.id).eq("creator_id", user.id).select("*").single();
+    setSavingVideo(false);
+    if (error) Alert.alert("Video not updated", error.message);
+    else {
+      setVideos((old) => old.map((row) => row.id === editingVideo.id ? { ...(data as VideoRow), creator: profile } : row));
+      setEditingVideo(null);
+      Alert.alert("Video details saved", "Your video settings are up to date.");
+    }
+  };
+
+  const deleteVideo = (video: VideoRow) => {
+    Alert.alert("Delete this video?", "This permanently removes the video record, comments, reactions and saved playlist references.", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete video", style: "destructive", onPress: () => void confirmDeleteVideo(video) },
+    ]);
+  };
+
+  const confirmDeleteVideo = async (video: VideoRow) => {
+    if (!user) return;
+    const { error } = await supabase.from("videos").delete().eq("id", video.id).eq("creator_id", user.id);
+    if (error) { Alert.alert("Video was not deleted", error.message); return; }
+    const [media, thumbnail] = await Promise.all([
+      supabase.storage.from("omnitube-videos").remove([video.video_path]),
+      video.thumbnail_path ? supabase.storage.from("omnitube-thumbnails").remove([video.thumbnail_path]) : Promise.resolve({ error: null }),
+    ]);
+    setVideos((old) => old.filter((row) => row.id !== video.id));
+    setSavedVideos((old) => old.filter((row) => row.id !== video.id));
+    if (editingVideo?.id === video.id) setEditingVideo(null);
+    if (media.error || thumbnail.error) Alert.alert("Video record deleted", "The database record is gone, but a media object may need storage cleanup.");
+    else Alert.alert("Video deleted", "The upload and its related content have been removed.");
+  };
+
   const saveProfile = async () => {
     if (!user || savingProfile) return;
     const cleanName = displayName.trim();
@@ -107,7 +165,7 @@ export default function ProfileScreen() {
       numColumns={2} keyExtractor={(item) => item.id}
       columnWrapperStyle={{ gap: 12, alignItems: "flex-start" }}
       contentContainerStyle={styles.profileList}
-      renderItem={({ item }) => <VideoCard video={item}/>}
+      renderItem={({ item }) => <View style={styles.uploadItem}><VideoCard video={item}/><View style={styles.uploadActions}><Pressable onPress={() => beginVideoEdit(item)} style={styles.uploadAction}><Ionicons name="create-outline" size={14} color={theme.mint}/><Text style={styles.uploadActionText}>Edit details</Text></Pressable><Pressable onPress={() => deleteVideo(item)} style={[styles.uploadAction,styles.uploadActionDanger]}><Ionicons name="trash-outline" size={13} color={theme.coral}/><Text style={[styles.uploadActionText,{color:theme.coral}]}>Delete</Text></Pressable></View></View>}
       ListHeaderComponent={<View>
         <View style={styles.header}><Brand/><Pressable onPress={() => router.push("/notifications")} style={styles.headerIcon}><Ionicons name="notifications-outline" size={21} color={theme.text}/></Pressable></View>
         <View style={styles.profileHero}>
@@ -125,6 +183,16 @@ export default function ProfileScreen() {
           <Text style={styles.formLabel}>USERNAME</Text><TextInput value={username} onChangeText={setUsername} autoCapitalize="none" maxLength={24} style={ui.input} placeholder="creator_handle" placeholderTextColor={theme.subtle}/>
           <Text style={styles.formLabel}>BIO</Text><TextInput value={bio} onChangeText={setBio} multiline maxLength={500} style={[ui.input, ui.multiline]} placeholder="Tell people what you create…" placeholderTextColor={theme.subtle}/>
           <ActionButton title="Save creator profile" icon="checkmark-circle-outline" busy={savingProfile} onPress={() => void saveProfile()}/>
+        </Surface>}
+        {editingVideo && <Surface style={styles.editVideoCard}>
+          <View style={styles.editVideoHeader}><View style={{flex:1}}><Eyebrow>VIDEO SETTINGS</Eyebrow><Text style={styles.editVideoTitle}>Edit your upload</Text></View><Pressable onPress={() => setEditingVideo(null)} style={styles.editClose}><Ionicons name="close" size={17} color={theme.muted}/></Pressable></View>
+          <Text style={styles.formLabel}>TITLE</Text><TextInput value={editTitle} onChangeText={setEditTitle} maxLength={180} style={ui.input} placeholder="Video title" placeholderTextColor={theme.subtle}/>
+          <Text style={styles.formLabel}>DESCRIPTION</Text><TextInput value={editDescription} onChangeText={setEditDescription} maxLength={5000} multiline style={[ui.input,ui.multiline]} placeholder="Describe your video" placeholderTextColor={theme.subtle}/>
+          <Text style={styles.formLabel}>VISIBILITY</Text><View style={styles.editorChips}>{(["public","unlisted","private"] as const).map(value => <Pressable key={value} onPress={() => setEditVisibility(value)} style={[styles.editorChip,editVisibility===value&&styles.editorChipActive]}><Text style={[styles.editorChipText,editVisibility===value&&styles.editorChipTextActive]}>{value[0].toUpperCase()+value.slice(1)}</Text></Pressable>)}</View>
+          <Text style={styles.formLabel}>FORMAT</Text><View style={styles.editorChips}>{(["video","short"] as const).map(value => <Pressable key={value} onPress={() => setEditKind(value)} style={[styles.editorChip,editKind===value&&styles.editorChipActive]}><Text style={[styles.editorChipText,editKind===value&&styles.editorChipTextActive]}>{value==="video"?"Long-form video":"Short"}</Text></Pressable>)}</View>
+          <Text style={styles.formLabel}>CATEGORY</Text><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.editorChips}>{["Other","Education","Gaming","Music","Technology","Lifestyle","Science","Sports","News","Comedy","Film"].map(value => <Pressable key={value} onPress={() => setEditCategory(value)} style={[styles.editorChip,editCategory===value&&styles.editorChipActive]}><Text style={[styles.editorChipText,editCategory===value&&styles.editorChipTextActive]}>{value}</Text></Pressable>)}</ScrollView>
+          <Pressable onPress={() => setEditComments(old => !old)} style={styles.commentPermission}><Ionicons name={editComments?"chatbubbles-outline":"chatbubble-ellipses-outline"} size={18} color={theme.mint}/><Text style={styles.commentPermissionText}>Allow comments</Text><View style={[styles.switch,editComments&&styles.switchEnabled]}><View style={[styles.switchKnob,editComments&&styles.switchKnobEnabled]}/></View></Pressable>
+          <ActionButton title="Save video settings" icon="checkmark-circle-outline" busy={savingVideo} onPress={() => void saveVideoEdit()}/>
         </Surface>}
         <View style={styles.quickActions}>
           <Pressable style={styles.quickAction} onPress={() => router.push("/notifications")}><View style={styles.quickIcon}><Ionicons name="notifications-outline" size={19} color={theme.violet}/></View><Text style={styles.quickLabel}>Notifications</Text><Ionicons name="chevron-forward" size={17} color={theme.subtle}/></Pressable>
@@ -177,6 +245,26 @@ const styles = StyleSheet.create({
   quickIcon: { width: 34, height: 34, borderRadius: 10, alignItems: "center", justifyContent: "center", backgroundColor: theme.panel2 },
   quickLabel: { flex: 1, color: theme.text, fontSize: 11, fontWeight: "800" },
   countLabel: { color: theme.mint, fontSize: 10, fontWeight: "800" },
+  uploadItem: { flex: 1, minWidth: 0, marginBottom: 10 },
+  uploadActions: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 7 },
+  uploadAction: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, minHeight: 30, borderWidth: 1, borderColor: theme.line, borderRadius: 8, backgroundColor: theme.panel, paddingHorizontal: 4 },
+  uploadActionDanger: { borderColor: "#FF8A9D2D", backgroundColor: "#FF8A9D08" },
+  uploadActionText: { color: theme.mint, fontSize: 8, fontWeight: "900" },
+  editVideoCard: { marginTop: 14, gap: 10 },
+  editVideoHeader: { flexDirection: "row", alignItems: "center", gap: 10 },
+  editVideoTitle: { color: theme.text, fontSize: 16, fontWeight: "900", marginTop: 5 },
+  editClose: { width: 32, height: 32, borderWidth: 1, borderColor: theme.line, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  editorChips: { flexDirection: "row", flexWrap: "nowrap", gap: 7, alignItems: "center" },
+  editorChip: { paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: theme.line, borderRadius: 9, backgroundColor: theme.panel2 },
+  editorChipActive: { borderColor: "#63EAC849", backgroundColor: "#63EAC812" },
+  editorChipText: { color: theme.muted, fontSize: 9, fontWeight: "800" },
+  editorChipTextActive: { color: theme.mint },
+  commentPermission: { flexDirection: "row", alignItems: "center", gap: 9, paddingVertical: 5 },
+  commentPermissionText: { flex: 1, color: theme.text, fontSize: 10, fontWeight: "800" },
+  switch: { width: 39, height: 22, borderRadius: 12, backgroundColor: theme.panel3, padding: 3, justifyContent: "center" },
+  switchEnabled: { backgroundColor: "#63EAC846" },
+  switchKnob: { width: 16, height: 16, borderRadius: 10, backgroundColor: "#8892A8" },
+  switchKnobEnabled: { alignSelf: "flex-end", backgroundColor: theme.mint },
   savedStrip: { gap: 12 },
   savedCard: { width: 260 },
   smallMuted: { color: theme.subtle, fontSize: 10, lineHeight: 16, marginBottom: 5 },
