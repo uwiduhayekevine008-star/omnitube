@@ -23,7 +23,8 @@
         "CAMERA",
         "RECORD_AUDIO",
         "READ_MEDIA_IMAGES",
-        "READ_MEDIA_VIDEO"
+        "READ_MEDIA_VIDEO",
+        "POST_NOTIFICATIONS"
       ]
     },
     "plugins": [
@@ -35,6 +36,13 @@
           "photosPermission": "Choose photos and videos to publish to OmniTube.",
           "cameraPermission": "Capture content for your OmniTube community.",
           "microphonePermission": false
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#63EAC8",
+          "defaultChannel": "omnitube-activity"
         }
       ],
       [
