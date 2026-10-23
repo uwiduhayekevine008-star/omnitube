@@ -66,21 +66,36 @@ export default function ShortsScreen() {
   const [videos, setVideos] = useState<VideoRow[]>([]);
   const [active, setActive] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [message, setMessage] = useState("");
   const listRef = useRef<FlatList<VideoRow>>(null);
+  const pageRef = useRef(0);
+  const hasMoreRef = useRef(true);
   const pageHeight = Math.max(420, height - 145);
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (reset = true) => {
+    if (!reset && (!hasMoreRef.current || loadingMore)) return;
+    if (reset) { setLoading(true); pageRef.current = 0; hasMoreRef.current = true; }
+    else setLoadingMore(true);
+    const page = reset ? 0 : pageRef.current;
     const { data, error } = await supabase.from("videos")
       .select("id,creator_id,title,description,video_path,thumbnail_path,duration_seconds,visibility,kind,status,category,tags,allow_comments,views_count,published_at,created_at,updated_at")
       .eq("status", "published").eq("visibility", "public").eq("kind", "short")
-      .order("published_at", { ascending: false }).limit(30);
-    if (error) { setMessage(error.message); setLoading(false); return; }
-    try { setVideos(await hydrateVideos((data || []) as unknown as VideoRow[])); setMessage(""); }
-    catch (e) { setMessage(e instanceof Error ? e.message : "Could not prepare Shorts."); }
-    setLoading(false);
-  }, []);
-  useEffect(() => { void load(); }, [load]);
+      .order("published_at", { ascending: false }).range(page * 18, page * 18 + 17);
+    if (error) {
+      setMessage(error.message);
+      setLoading(false); setLoadingMore(false);
+      return;
+    }
+    try {
+      const hydrated = await hydrateVideos((data || []) as unknown as VideoRow[]);
+      setVideos((old) => reset ? hydrated : [...old, ...hydrated]);
+      pageRef.current = page + 1;
+      hasMoreRef.current = (data || []).length === 18;
+      setMessage("");
+    } catch (e) { setMessage(e instanceof Error ? e.message : "Could not prepare Shorts."); }
+    setLoading(false); setLoadingMore(false);
+  }, [loadingMore]);
+  useEffect(() => { void load(true); }, [load]);
 
   const toggleLike = async (video: VideoRow) => {
     if (!user) { Alert.alert("Sign in to like", "Your reactions stay synced across devices.", [{ text: "Cancel" }, { text: "Sign in", onPress: () => router.push("/(tabs)/profile") }]); return; }
@@ -112,7 +127,7 @@ export default function ShortsScreen() {
       showsVerticalScrollIndicator={false} getItemLayout={(_, index) => ({ length: pageHeight, offset: pageHeight * index, index })}
       onMomentumScrollEnd={(event) => { const next = Math.round(event.nativeEvent.contentOffset.y / pageHeight); setActive(next); }}
       initialNumToRender={2} maxToRenderPerBatch={2} windowSize={3} removeClippedSubviews
-      onEndReachedThreshold={0.4} onEndReached={() => { if (videos.length < 30) void load(); }}
+      onEndReachedThreshold={0.65} onEndReached={() => { if (!loading && !loadingMore) void load(false); }} ListFooterComponent={loadingMore ? <ActivityIndicator color={theme.mint} style={{marginVertical:12}}/> : null}
       style={{ flex: 1 }} />
   </AppScreen>;
 }
