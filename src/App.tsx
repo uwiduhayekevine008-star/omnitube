@@ -199,9 +199,8 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
     const element = videoElement.current;
     if (!element || !src || playbackType !== "hls") return;
 
-    const canUseNativeHls =
-      Boolean(element.canPlayType("application/vnd.apple.mpegurl")) &&
-      ("ManagedMediaSource" in window || /Safari/i.test(navigator.userAgent));
+    const nativeHlsSupported = Boolean(element.canPlayType("application/vnd.apple.mpegurl"));
+    const canUseNativeHls = nativeHlsSupported && ("ManagedMediaSource" in window || !Hls.isSupported());
     if (canUseNativeHls) {
       element.src = src;
       element.load();
