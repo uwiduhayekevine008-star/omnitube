@@ -628,7 +628,7 @@ function App() {
     if (!isSupabaseConfigured) { setLoading(false); return; }
     setLoading(true);
     let request = supabase.from("videos").select("id,creator_id,title,description,video_path,thumbnail_path,duration_seconds,visibility,kind,status,category,views_count,published_at,created_at,video_reactions(count),comments(count)")
-      .eq("status", "published").in("visibility", ["public", "unlisted"]);
+      .eq("status", "published").eq("visibility", "public");
     if (section === "shorts") request = request.eq("kind", "short") as typeof request;
     if (section === "subscriptions") {
       if (!user?.id || followingIds.length === 0) { setVideos([]); setLoading(false); return; }
@@ -691,7 +691,7 @@ function App() {
 
   const loadStreams = useCallback(async () => {
     if (section !== "live") return;
-    const { data, error } = await supabase.from("live_streams").select("id,creator_id,title,description,status,visibility,room_name,starts_at").in("status", ["live", "scheduled"]).in("visibility", ["public", "unlisted"]).order("starts_at", { ascending: true }).limit(40);
+    const { data, error } = await supabase.from("live_streams").select("id,creator_id,title,description,status,visibility,room_name,starts_at").in("status", ["live", "scheduled"]).eq("visibility", "public").order("starts_at", { ascending: true }).limit(40);
     if (error) { notify("Could not load live rooms", error.message, "error"); return; }
     const rows = (data || []) as unknown as StreamRow[];
     const ids = Array.from(new Set(rows.map((row) => row.creator_id)));
