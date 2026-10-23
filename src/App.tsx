@@ -589,7 +589,7 @@ function App() {
 
   useEffect(() => {
     const syncWatchLocation = () => {
-      const nextId = window.location.pathname.match(/^\\/watch\\/([0-9a-f-]{36})$/i)?.[1] || null;
+      const nextId = window.location.pathname.match(/^\/watch\/([0-9a-f-]{36})$/i)?.[1] || null;
       setRouteVideoId(nextId);
       setSelectedVideo((current) => current?.id === nextId ? current : null);
     };
@@ -679,7 +679,7 @@ function App() {
       request = request.in("creator_id", followingIds) as typeof request;
     }
     if (appliedQuery.trim()) {
-      const safe = appliedQuery.trim().replace(/[,%()]/g, " ").replace(/\\s+/g, " ").slice(0, 100);
+      const safe = appliedQuery.trim().replace(/[,%()]/g, " ").replace(/\s+/g, " ").slice(0, 100);
       if (safe) request = request.or("title.ilike.%" + safe + "%,description.ilike.%" + safe + "%") as typeof request;
     }
     if (section === "trending") request = request.order("views_count", { ascending: false }).order("published_at", { ascending: false }) as typeof request;
@@ -716,7 +716,7 @@ function App() {
     if (section === "shorts") request = request.eq("kind", "short") as typeof request;
     if (section === "subscriptions") request = request.in("creator_id", followingIds) as typeof request;
     if (appliedQuery.trim()) {
-      const safe = appliedQuery.trim().replace(/[,%()]/g, " ").replace(/\\s+/g, " ").slice(0, 100);
+      const safe = appliedQuery.trim().replace(/[,%()]/g, " ").replace(/\s+/g, " ").slice(0, 100);
       if (safe) request = request.or("title.ilike.%" + safe + "%,description.ilike.%" + safe + "%") as typeof request;
     }
     if (section === "trending") request = request.order("views_count", { ascending: false }).order("published_at", { ascending: false }) as typeof request;
