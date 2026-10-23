@@ -80,10 +80,11 @@ begin
   end if;
 
   if new.thumbnail_path is not null then
-    -- Validate new thumbnail assignments, but do not block harmless title or
-    -- description edits because an older thumbnail is stored in another format.
-    if tg_op = 'UPDATE' and new.thumbnail_path is not distinct from old.thumbnail_path then
-      return new;
+    -- Only validate a newly assigned thumbnail; legacy thumbnails must not block title edits.
+    if tg_op = 'UPDATE' then
+      if new.thumbnail_path is not distinct from old.thumbnail_path then
+        return new;
+      end if;
     end if;
 
     if new.thumbnail_path not like new.creator_id::text || '/%'
