@@ -19,22 +19,48 @@
     "android": {
       "package": "com.omnitube.mobile",
       "edgeToEdgeEnabled": true,
-      "permissions": ["CAMERA", "RECORD_AUDIO", "READ_MEDIA_IMAGES", "READ_MEDIA_VIDEO"]
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO"
+      ]
     },
     "plugins": [
       "expo-router",
       "expo-sqlite",
-      ["expo-image-picker", { "photosPermission": "Choose photos and videos to publish to OmniTube.", "cameraPermission": "Capture content for your OmniTube community.", "microphonePermission": false }],
-      ["expo-video", { "supportsBackgroundPlayback": true, "supportsPictureInPicture": true }],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Choose photos and videos to publish to OmniTube.",
+          "cameraPermission": "Capture content for your OmniTube community.",
+          "microphonePermission": false
+        }
+      ],
+      [
+        "expo-video",
+        {
+          "supportsBackgroundPlayback": true,
+          "supportsPictureInPicture": true
+        }
+      ],
       "@livekit/react-native-expo-plugin",
-      ["@config-plugins/react-native-webrtc", { "cameraPermission": "OmniTube uses your camera when you choose to broadcast.", "microphonePermission": "OmniTube uses your microphone for live broadcasts." }]
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "OmniTube uses your camera when you choose to broadcast.",
+          "microphonePermission": "OmniTube uses your microphone for live broadcasts."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
-      "router": { "origin": false },
-      "eas": { "projectId": "CONFIGURE_WITH_EAS_INIT" }
+      "router": {
+        "origin": false
+      },
+      "eas": {}
     }
   }
 }
