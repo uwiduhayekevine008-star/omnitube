@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ActivityIndicator, Alert, FlatList, Pressable, Share, StyleSheet, Text, useWindowDimensions, View } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { VideoView, useVideoPlayer } from "expo-video";
 import * as Haptics from "expo-haptics";
 import { AppScreen, Avatar, Brand, EmptyState } from "../../src/components/ui";
@@ -10,11 +10,13 @@ import { formatCount, hydrateVideos, resolvePlayback, timeAgo } from "../../src/
 import { supabase } from "../../src/lib/supabase";
 import type { VideoRow } from "../../src/lib/types";
 import { theme } from "../../src/theme";
+import { readDevicePreferences, type DevicePreferences } from "../../src/lib/preferences";
 
-function ShortSlide({ video, active, userId, onLike, onSave }: { video: VideoRow; active: boolean; userId: string | null; onLike: () => void; onSave: () => void }) {
+function ShortSlide({ video, active, userId, onLike, onSave, autoPlay, hapticsEnabled, reduceDataUsage }: { video: VideoRow; active: boolean; userId: string | null; onLike: () => void; onSave: () => void; autoPlay: boolean; hapticsEnabled: boolean; reduceDataUsage: boolean }) {
   const [playback, setPlayback] = useState("");
   const [playbackError, setPlaybackError] = useState("");
   const [liked, setLiked] = useState(false);
+  const [paused, setPaused] = useState(false);
   const player = useVideoPlayer(null, (instance) => { instance.loop = true; instance.muted = false; });
   useEffect(() => {
     let activeRequest = true;
@@ -23,10 +25,14 @@ function ShortSlide({ video, active, userId, onLike, onSave }: { video: VideoRow
     void resolvePlayback(video.id).then((url) => {
       if (!activeRequest) return;
       setPlayback(url);
-      return player.replaceAsync({ uri: url }).then(() => { if (activeRequest) player.play(); });
+      setPaused(!autoPlay);
+      return player.replaceAsync({ uri: url, useCaching: !reduceDataUsage }).then(() => {
+        if (!activeRequest) return;
+        if (autoPlay) player.play(); else player.pause();
+      });
     }).catch((error) => { if (activeRequest) setPlaybackError(error instanceof Error ? error.message : "Playback could not be loaded."); });
     return () => { activeRequest = false; player.pause(); };
-  }, [active, video.id, player]);
+  }, [active, video.id, player, autoPlay, reduceDataUsage]);
   useEffect(() => {
     let alive = true;
     if (!active || !userId) { setLiked(false); return () => { alive = false; }; }
@@ -36,7 +42,11 @@ function ShortSlide({ video, active, userId, onLike, onSave }: { video: VideoRow
   }, [active, userId, video.id]);
 
   return <View style={styles.slide}>
-    {active && playback ? <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} allowsPictureInPicture={false} /> : <View style={styles.videoFallback}><View style={styles.fallbackOrb} /><Ionicons name="play" size={32} color={theme.violet} /></View>}
+    {active && playback ? <>
+      <VideoView player={player} style={StyleSheet.absoluteFill} contentFit="cover" nativeControls={false} allowsPictureInPicture={false} />
+      <Pressable style={StyleSheet.absoluteFill} onPress={() => { if (player.playing) { player.pause(); setPaused(true); } else { player.play(); setPaused(false); } }} accessibilityRole="button" accessibilityLabel={paused ? "Resume Short" : "Pause Short"} />
+      {paused && <View pointerEvents="none" style={styles.pausedBadge}><Ionicons name="play" size={23} color="#FFFFFF" /></View>}
+    </> : <View style={styles.videoFallback}><View style={styles.fallbackOrb} /><Ionicons name="play" size={32} color={theme.violet} /></View>}
     <View style={styles.gradientTop}><Brand compact /><View style={styles.shortsWord}><Ionicons name="flash" size={14} color={theme.mint} /><Text style={styles.shortsWordText}>OMNI SHORTS</Text></View></View>
     {playbackError ? <View style={styles.playbackError}><Ionicons name="alert-circle-outline" size={23} color={theme.coral}/><Text style={styles.playbackErrorText}>{playbackError}</Text></View> : !playback && active ? <View style={styles.preparing}><ActivityIndicator color={theme.mint}/><Text style={styles.preparingText}>Preparing secure playback…</Text></View> : null}
     <View style={styles.bottomGradient}>
@@ -51,7 +61,7 @@ function ShortSlide({ video, active, userId, onLike, onSave }: { video: VideoRow
         <Pressable onPress={() => router.push({ pathname: "/watch/[id]", params: { id: video.id } })} style={styles.fullVideo}><Ionicons name="open-outline" size={14} color={theme.mint}/><Text style={styles.fullVideoText}>Open full video & comments</Text></Pressable>
       </View>
       <View style={styles.actionRail}>
-        <Pressable style={styles.railAction} onPress={async () => { await Haptics.selectionAsync(); setLiked((old) => !old); onLike(); }}><View style={[styles.railIcon, liked && styles.likedIcon]}><Ionicons name={liked ? "heart" : "heart-outline"} size={23} color={liked ? theme.coral : theme.text}/></View><Text style={styles.railLabel}>Like</Text></Pressable>
+        <Pressable style={styles.railAction} onPress={async () => { if (hapticsEnabled) await Haptics.selectionAsync(); setLiked((old) => !old); onLike(); }}><View style={[styles.railIcon, liked && styles.likedIcon]}><Ionicons name={liked ? "heart" : "heart-outline"} size={23} color={liked ? theme.coral : theme.text}/></View><Text style={styles.railLabel}>Like</Text></Pressable>
         <Pressable style={styles.railAction} onPress={() => router.push({ pathname: "/watch/[id]", params: { id: video.id } })}><View style={styles.railIcon}><Ionicons name="chatbubble-ellipses-outline" size={22} color={theme.text}/></View><Text style={styles.railLabel}>Discuss</Text></Pressable>
         <Pressable style={styles.railAction} onPress={onSave}><View style={styles.railIcon}><Ionicons name="bookmark-outline" size={22} color={theme.text}/></View><Text style={styles.railLabel}>Save</Text></Pressable>
         <Pressable style={styles.railAction} onPress={() => void Share.share({ message: video.title + "\n" + "omnitube:///watch/" + video.id })}><View style={styles.railIcon}><Ionicons name="arrow-redo-outline" size={22} color={theme.text}/></View><Text style={styles.railLabel}>Share</Text></Pressable>
@@ -123,7 +133,7 @@ export default function ShortsScreen() {
 
   return <AppScreen style={{ paddingTop: 0 }}>
     <FlatList ref={listRef} data={videos} keyExtractor={(item) => item.id}
-      renderItem={({ item, index }) => <ShortSlide video={item} active={index === active} userId={user?.id || null} onLike={() => void toggleLike(item)} onSave={() => void save(item)} />}
+      renderItem={({ item, index }) => <ShortSlide video={item} active={index === active} userId={user?.id || null} onLike={() => void toggleLike(item)} onSave={() => void save(item)} autoPlay={devicePreferences.autoPlayShorts} hapticsEnabled={devicePreferences.hapticsEnabled} reduceDataUsage={devicePreferences.reduceDataUsage} />}
       pagingEnabled snapToInterval={pageHeight} decelerationRate="fast" snapToAlignment="start"
       showsVerticalScrollIndicator={false} getItemLayout={(_, index) => ({ length: pageHeight, offset: pageHeight * index, index })}
       onMomentumScrollEnd={(event) => { const next = Math.round(event.nativeEvent.contentOffset.y / pageHeight); setActive(next); }}
@@ -134,6 +144,7 @@ export default function ShortsScreen() {
 }
 const styles = StyleSheet.create({
   slide: { height: "100%", backgroundColor: "#05060A", overflow: "hidden" },
+  pausedBadge: { position: "absolute", top: "46%", left: "50%", width: 61, height: 61, marginLeft: -30.5, marginTop: -30.5, borderRadius: 31, backgroundColor: "#070910B8", borderWidth: 1, borderColor: "#FFFFFF45", alignItems: "center", justifyContent: "center", paddingLeft: 3 },
   videoFallback: { ...StyleSheet.absoluteFill, backgroundColor: "#111626", justifyContent: "center", alignItems: "center" },
   fallbackOrb: { position: "absolute", width: 260, height: 260, borderRadius: 150, backgroundColor: "#A99AFF16" },
   gradientTop: { position: "absolute", top: 12, left: 16, right: 16, zIndex: 5, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
