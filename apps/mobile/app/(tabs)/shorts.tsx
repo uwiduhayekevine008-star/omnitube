@@ -71,11 +71,12 @@ export default function ShortsScreen() {
   const listRef = useRef<FlatList<VideoRow>>(null);
   const pageRef = useRef(0);
   const hasMoreRef = useRef(true);
+  const loadingMoreRef = useRef(false);
   const pageHeight = Math.max(420, height - 145);
   const load = useCallback(async (reset = true) => {
-    if (!reset && (!hasMoreRef.current || loadingMore)) return;
+    if (!reset && (!hasMoreRef.current || loadingMoreRef.current)) return;
     if (reset) { setLoading(true); pageRef.current = 0; hasMoreRef.current = true; }
-    else setLoadingMore(true);
+    else { loadingMoreRef.current = true; setLoadingMore(true); }
     const page = reset ? 0 : pageRef.current;
     const { data, error } = await supabase.from("videos")
       .select("id,creator_id,title,description,video_path,thumbnail_path,duration_seconds,visibility,kind,status,category,tags,allow_comments,views_count,published_at,created_at,updated_at")
@@ -83,7 +84,7 @@ export default function ShortsScreen() {
       .order("published_at", { ascending: false }).range(page * 18, page * 18 + 17);
     if (error) {
       setMessage(error.message);
-      setLoading(false); setLoadingMore(false);
+      setLoading(false); loadingMoreRef.current = false; setLoadingMore(false);
       return;
     }
     try {
@@ -93,8 +94,8 @@ export default function ShortsScreen() {
       hasMoreRef.current = (data || []).length === 18;
       setMessage("");
     } catch (e) { setMessage(e instanceof Error ? e.message : "Could not prepare Shorts."); }
-    setLoading(false); setLoadingMore(false);
-  }, [loadingMore]);
+    setLoading(false); loadingMoreRef.current = false; setLoadingMore(false);
+  }, []);
   useEffect(() => { void load(true); }, [load]);
 
   const toggleLike = async (video: VideoRow) => {
