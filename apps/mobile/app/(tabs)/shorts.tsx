@@ -134,7 +134,7 @@ export default function ShortsScreen() {
 }
 const styles = StyleSheet.create({
   slide: { height: "100%", backgroundColor: "#05060A", overflow: "hidden" },
-  videoFallback: { ...StyleSheet.absoluteFillObject, backgroundColor: "#111626", justifyContent: "center", alignItems: "center" },
+  videoFallback: { ...StyleSheet.absoluteFill, backgroundColor: "#111626", justifyContent: "center", alignItems: "center" },
   fallbackOrb: { position: "absolute", width: 260, height: 260, borderRadius: 150, backgroundColor: "#A99AFF16" },
   gradientTop: { position: "absolute", top: 12, left: 16, right: 16, zIndex: 5, flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   shortsWord: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#090B13C9", paddingVertical: 7, paddingHorizontal: 10, borderRadius: 8 },
