@@ -85,7 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
     setProfile(null);
-  }, []);
+  }, [session?.user?.id]);
 
   const value = useMemo<AuthState>(() => ({
     session, user: session?.user || null, profile, loading, signInWithEmail, signOut, refreshProfile,
