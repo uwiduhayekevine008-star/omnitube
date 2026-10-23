@@ -877,9 +877,10 @@ function App() {
       if (target.data) rows = [target.data as unknown as PostRow, ...rows];
     }
     const ids = Array.from(new Set(rows.map((row) => row.creator_id)));
+    const postIds = rows.map((row) => row.id);
     const [prof, reactions] = await Promise.all([
       ids.length ? supabase.from("profiles").select("id,username,display_name,avatar_url,bio,is_verified").in("id", ids) : Promise.resolve({ data: [] as any[] }),
-      ids.length ? supabase.from("post_reactions").select("post_id,user_id").in("post_id", ids) : Promise.resolve({ data: [] as any[] })
+      postIds.length ? supabase.from("post_reactions").select("post_id,user_id").in("post_id", postIds) : Promise.resolve({ data: [] as any[] })
     ]);
     const profileMap = new Map((prof.data || []).map((person: any) => [person.id, person]));
     const counts = new Map<string, number>();
