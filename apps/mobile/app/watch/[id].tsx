@@ -170,7 +170,7 @@ export default function WatchScreen() {
           <Pressable onPress={() => void toggleLike()} style={[styles.action, liked && styles.actionActive]}><Ionicons name={liked ? "heart" : "heart-outline"} size={19} color={liked ? theme.coral : theme.text}/><Text style={styles.actionLabel}>{formatCount(likeCount)}</Text></Pressable>
           <Pressable onPress={() => void saveToPlaylist()} style={styles.action}><Ionicons name="bookmark-outline" size={19} color={theme.text}/><Text style={styles.actionLabel}>Save</Text></Pressable>
           <Pressable onPress={() => void repost()} style={styles.action}><Ionicons name="repeat-outline" size={19} color={theme.text}/><Text style={styles.actionLabel}>Repost</Text></Pressable>
-          <Pressable onPress={() => void Share.share({ message: video.title + "\nhttps://omnitube.app/watch/" + video.id })} style={styles.action}><Ionicons name="arrow-redo-outline" size={19} color={theme.text}/><Text style={styles.actionLabel}>Share</Text></Pressable>
+          <Pressable onPress={() => void Share.share({ message: video.title + "\nomnitube:///watch/" + video.id })} style={styles.action}><Ionicons name="arrow-redo-outline" size={19} color={theme.text}/><Text style={styles.actionLabel}>Share</Text></Pressable>
         </View>
         {video.description ? <Surface style={styles.description}><Eyebrow>ABOUT THIS VIDEO</Eyebrow><Text style={styles.descriptionText}>{video.description}</Text></Surface> : null}
         <View style={styles.commentsSection}>
