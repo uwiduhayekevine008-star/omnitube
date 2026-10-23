@@ -10,7 +10,7 @@ export default function RootLayout() {
     void AudioSession.startAudioSession();
     return () => { void AudioSession.stopAudioSession(); };
   }, []);
-  return <AuthProvider><StatusBar style="light" backgroundColor={theme.bg} /><Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg }, animation: "fade_from_bottom" }}>
+  return <AuthProvider><StatusBar style="light" /><Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg }, animation: "fade_from_bottom" }}>
     <Stack.Screen name="(tabs)" />
     <Stack.Screen name="watch/[id]" options={{ animation: "slide_from_bottom" }} />
     <Stack.Screen name="creator/[id]" options={{ animation: "slide_from_right" }} />
