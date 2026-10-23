@@ -537,6 +537,7 @@ function App() {
   const [liveTitle, setLiveTitle] = useState("");
   const [liveDescription, setLiveDescription] = useState("");
   const [selectedVideo, setSelectedVideo] = useState<VideoRow | null>(null);
+  const [routeVideoId] = useState<string | null>(() => window.location.pathname.match(/^\/watch\/([0-9a-f-]{36})$/i)?.[1] || null);
   const [reportTarget, setReportTarget] = useState<{ type: "video" | "post"; id: string } | null>(null);
   const [room, setRoom] = useState<{ stream: StreamRow; token: string; broadcaster: boolean } | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -602,6 +603,26 @@ function App() {
       }).subscribe();
     return () => { active = false; void supabase.removeChannel(channel); };
   }, [user?.id, notify]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !routeVideoId) return;
+    let active = true;
+    void (async () => {
+      const { data, error } = await supabase.from("videos")
+        .select("id,creator_id,title,description,video_path,thumbnail_path,duration_seconds,visibility,kind,status,category,views_count,published_at,created_at,allow_comments,video_reactions(count),comments(count)")
+        .eq("id", routeVideoId).maybeSingle();
+      if (!active) return;
+      if (error || !data) {
+        notify("Video link unavailable", "This video may be private, removed, or not published.", "error");
+        return;
+      }
+      const { data: author } = await supabase.from("profiles")
+        .select("id,username,display_name,avatar_url,bio,is_verified")
+        .eq("id", data.creator_id).maybeSingle();
+      if (active) setSelectedVideo({ ...(data as unknown as VideoRow), creator: author as Profile | null || undefined });
+    })();
+    return () => { active = false; };
+  }, [routeVideoId, user?.id, notify]);
 
   const loadVideos = useCallback(async () => {
     if (!isSupabaseConfigured) { setLoading(false); return; }
