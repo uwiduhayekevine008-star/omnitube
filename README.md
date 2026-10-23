@@ -103,6 +103,7 @@ Deploy the functions to the **same** project referenced by \`VITE_SUPABASE_URL\`
 npx supabase functions deploy resolve-playback --no-verify-jwt
 npx supabase functions deploy publish-video
 npx supabase functions deploy livekit-token
+npx supabase functions deploy delete-video
 \`\`\`
 
 \`resolve-playback\` disables gateway-level JWT verification because it also supports anonymous playback of public videos; it manually validates signed-in identity before granting access to private media. \`publish-video\` and \`livekit-token\` require authentication.
@@ -115,9 +116,38 @@ npx supabase secrets set LIVEKIT_API_KEY=YOUR_LIVEKIT_API_KEY LIVEKIT_API_SECRET
 
 Set \`VITE_LIVEKIT_URL\` to the connection URL given by your LiveKit service. A broadcast token cannot make LiveKit work without an actual LiveKit deployment and valid server credentials; the app reports this configuration requirement rather than faking a live connection.
 
-## 4. Auth and email
+## 4. Adaptive video delivery and media-worker operations
 
-Enable email OTP / magic-link sign-in in Supabase Auth. Set the Auth Site URL to your deployed site and allow your local development origin (normally \`http://localhost:5173\`) under redirect URLs. Configure sender/SMTP and rate limits appropriate for your audience. Verify the email link flow after setting up your domain.
+Newly published videos are queued in the private `media_processing_jobs` table. The worker in `services/media-worker` downloads the owner-scoped source from private storage, validates dimensions and duration with `ffprobe`, creates H.264/AAC HLS renditions with FFmpeg (360p and higher profiles when the source supports them), writes a master manifest, uploads segments/manifests to the private `omnitube-renditions` bucket, and marks the video media state `ready`. The web player uses HLS.js where native HLS is not available; Expo Video receives explicit HLS content type on native playback. Until a rendition is ready, playback authorization can return a short-lived signed URL for the original file.
+
+Apply and review the SQL migrations before deploying the new data model or Edge Functions:
+
+```bash
+npx supabase login
+npx supabase link --project-ref YOUR_PROJECT_REF
+npx supabase db push
+npx supabase functions deploy resolve-playback --no-verify-jwt
+npx supabase functions deploy publish-video
+npx supabase functions deploy livekit-token
+npx supabase functions deploy delete-video
+```
+
+Run the worker as a separate long-running container on infrastructure with CPU, memory, local temporary disk, and outbound access to Supabase Storage. FFmpeg is included in its Docker image:
+
+```bash
+docker build -t omnitube-media-worker ./services/media-worker
+docker run --restart unless-stopped --env-file /secure/path/omnitube-media-worker.env omnitube-media-worker
+```
+
+The environment file must be delivered by a secret manager and contain `SUPABASE_URL` and the **server-only** `SUPABASE_SERVICE_ROLE_KEY`; never commit it or place it in `VITE_*` or `EXPO_PUBLIC_*` variables. Tune the worker ID, polling interval, lease, attempt limit, source-size limit, maximum duration, and FFmpeg preset according to the actual host capacity. The worker emits structured JSON logs and retries failed jobs with bounded exponential backoff. Configure centralized logs, alerts, disk monitoring, queue-age alerts, worker replicas, resource limits, and capacity tests before public launch.
+
+Verify a deployment with an authenticated account and a small permitted source video: the upload must appear in the private source bucket, a queue row must be created, worker logs must show a completed transcode, a private HLS manifest must be uploaded, and the public playback endpoint must return an HLS playback URL. Also test anonymous access to private media, visibility changes after ticket issuance, network failure/retry, corrupt input, worker restart, and deletion during processing. These live service checks are not performed by a source-code commit or GitHub CI alone.
+
+## 5. Auth and email
+
+Enable email OTP / magic-link sign-in in Supabase Auth. Set the Auth Site URL to your deployed site and allow your local development origin (normally `http://localhost:5173`) under redirect URLs. Configure sender/SMTP and rate limits appropriate for your audience. Verify the email link flow after setting up your domain.
+
+ Set the Auth Site URL to your deployed site and allow your local development origin (normally \`http://localhost:5173\`) under redirect URLs. Configure sender/SMTP and rate limits appropriate for your audience. Verify the email link flow after setting up your domain.
 
 ## 5. Production-readiness checklist
 
@@ -126,7 +156,7 @@ Before launch, complete and verify these environment-dependent operations:
 - Configure production web hosting, domain, HTTPS, CSP, security headers, and environment secrets.
 - Enable and test email delivery, abuse/rate limits, CAPTCHA or bot protection, account deletion and data-export policies.
 - Configure LiveKit, signaling/egress where needed, recording/replay and billing limits. LiveKit credentials are not included in this repository.
-- Add a media transcoding pipeline (multi-bitrate HLS/DASH, thumbnails, moderation scans, duration/dimension checks, and safe transcoding) for large-scale adaptive streaming. Current upload flow stores original media and supports authorized playback; it is not an adaptive transcoding farm.
+- The repository now includes an HLS transcode queue, FFmpeg worker, private rendition storage, signed manifest/segment delivery, and original-file fallback during processing. Configure, deploy, and verify the worker in a real environment; add a moderation/scanning pipeline, capacity autoscaling, lifecycle cleanup for orphaned renditions, CDN strategy, and load testing before operating at global scale.
 - Configure backups/PITR, retention, observability, log redaction, incident response, content moderation, copyright/takedown handling, and report-review operations.
 - Add signed payment-provider webhooks before enabling paid memberships; membership records do not by themselves charge a customer or validate a payment.
 - Run end-to-end security tests under anon, user A, user B, and service roles; check RLS, signed URLs, private/unlisted visibility, storage path ownership, and moderation transitions.
