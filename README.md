@@ -104,6 +104,7 @@ npx supabase functions deploy resolve-playback --no-verify-jwt
 npx supabase functions deploy publish-video
 npx supabase functions deploy livekit-token
 npx supabase functions deploy delete-video
+npx supabase functions deploy retry-media-processing
 \`\`\`
 
 \`resolve-playback\` disables gateway-level JWT verification because it also supports anonymous playback of public videos; it manually validates signed-in identity before granting access to private media. \`publish-video\` and \`livekit-token\` require authentication.
@@ -130,6 +131,7 @@ npx supabase functions deploy resolve-playback --no-verify-jwt
 npx supabase functions deploy publish-video
 npx supabase functions deploy livekit-token
 npx supabase functions deploy delete-video
+npx supabase functions deploy retry-media-processing
 ```
 
 Run the worker as a separate long-running container on infrastructure with CPU, memory, local temporary disk, and outbound access to Supabase Storage. FFmpeg is included in its Docker image:
