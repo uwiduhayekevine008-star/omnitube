@@ -31,6 +31,7 @@ export default function ProfileScreen() {
   const [savingVideo, setSavingVideo] = useState(false);
   const [stats, setStats] = useState({ videos: 0, followers: 0, following: 0, views: 0 });
   const [pageLoading, setPageLoading] = useState(false);
+  const [retryingVideoId, setRetryingVideoId] = useState<string | null>(null);
 
   useEffect(() => {
     setDisplayName(profile?.display_name || "");
@@ -127,6 +128,24 @@ export default function ProfileScreen() {
     Alert.alert("Video deleted", "The server confirmed the original media and thumbnail were removed.");
   };
 
+  const retryMediaProcessing = async (video: VideoRow) => {
+    if (!user || video.media_status !== "failed" || retryingVideoId) return;
+    setRetryingVideoId(video.id);
+    try {
+      const { data, error } = await supabase.functions.invoke("retry-media-processing", { body: { videoId: video.id } });
+      if (error || !data?.success) {
+        Alert.alert("Media retry failed", error?.message || data?.error || "The server could not queue this retry.");
+        return;
+      }
+      await loadCreatorData();
+      Alert.alert("Media processing queued", "OmniTube will rebuild adaptive playback from your existing upload.");
+    } catch (error) {
+      Alert.alert("Media retry failed", error instanceof Error ? error.message : "Please try again.");
+    } finally {
+      setRetryingVideoId(null);
+    }
+  };
+
   const saveProfile = async () => {
     if (!user || savingProfile) return;
     const cleanName = displayName.trim();
@@ -166,7 +185,7 @@ export default function ProfileScreen() {
       numColumns={2} keyExtractor={(item) => item.id}
       columnWrapperStyle={{ gap: 12, alignItems: "flex-start" }}
       contentContainerStyle={styles.profileList}
-      renderItem={({ item }) => <View style={styles.uploadItem}><VideoCard video={item}/><View style={styles.uploadActions}><Pressable onPress={() => beginVideoEdit(item)} style={styles.uploadAction}><Ionicons name="create-outline" size={14} color={theme.mint}/><Text style={styles.uploadActionText}>Edit details</Text></Pressable><Pressable onPress={() => deleteVideo(item)} style={[styles.uploadAction,styles.uploadActionDanger]}><Ionicons name="trash-outline" size={13} color={theme.coral}/><Text style={[styles.uploadActionText,{color:theme.coral}]}>Delete</Text></Pressable></View></View>}
+      renderItem={({ item }) => <View style={styles.uploadItem}><VideoCard video={item}/>{item.status === "published" && item.media_status !== "ready" && <View style={styles.mediaState}><Ionicons name={item.media_status === "failed" ? "alert-circle-outline" : "sync-outline"} size={12} color={item.media_status === "failed" ? theme.coral : theme.amber}/><Text style={[styles.mediaStateText, item.media_status === "failed" && { color: theme.coral }]}>{item.media_status === "failed" ? "Adaptive processing failed" : item.media_status === "processing" ? "Preparing adaptive playback" : "Adaptive playback queued"}</Text></View>}<View style={styles.uploadActions}>{item.status === "published" && item.media_status === "failed" && <Pressable onPress={() => void retryMediaProcessing(item)} disabled={retryingVideoId !== null} style={styles.uploadAction}><Ionicons name="refresh-outline" size={14} color={theme.amber}/><Text style={[styles.uploadActionText,{color:theme.amber}]}>{retryingVideoId === item.id ? "Retrying…" : "Retry media"}</Text></Pressable>}<Pressable onPress={() => beginVideoEdit(item)} style={styles.uploadAction}><Ionicons name="create-outline" size={14} color={theme.mint}/><Text style={styles.uploadActionText}>Edit details</Text></Pressable><Pressable onPress={() => deleteVideo(item)} style={[styles.uploadAction,styles.uploadActionDanger]}><Ionicons name="trash-outline" size={13} color={theme.coral}/><Text style={[styles.uploadActionText,{color:theme.coral}]}>Delete</Text></Pressable></View></View>}
       ListHeaderComponent={<View>
         <View style={styles.header}><Brand/><Pressable onPress={() => router.push("/notifications")} style={styles.headerIcon}><Ionicons name="notifications-outline" size={21} color={theme.text}/></Pressable></View>
         <View style={styles.profileHero}>
@@ -252,6 +271,8 @@ const styles = StyleSheet.create({
   countLabel: { color: theme.mint, fontSize: 10, fontWeight: "800" },
   uploadItem: { flex: 1, minWidth: 0, marginBottom: 10 },
   uploadActions: { flexDirection: "row", alignItems: "center", gap: 6, marginTop: 7 },
+  mediaState: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 7, paddingHorizontal: 4 },
+  mediaStateText: { color: theme.amber, fontSize: 8, fontWeight: "800" },
   uploadAction: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 4, minHeight: 30, borderWidth: 1, borderColor: theme.line, borderRadius: 8, backgroundColor: theme.panel, paddingHorizontal: 4 },
   uploadActionDanger: { borderColor: "#FF8A9D2D", backgroundColor: "#FF8A9D08" },
   uploadActionText: { color: theme.mint, fontSize: 8, fontWeight: "900" },
