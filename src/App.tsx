@@ -4,7 +4,7 @@ import {
   Compass, Film, Flame, Heart, Home, Library, LogIn, LogOut, Menu, MessageCircle,
   Mic, MonitorPlay, MoreHorizontal, Play, Plus, Radio, Repeat2, Search, Send, Settings,
   ShieldAlert, Sparkles, ThumbsUp, TrendingUp, Upload, Users, Video as VideoIcon, Volume2, X,
-  Captions, Maximize, Minimize, PictureInPicture2, Settings2, SkipBack, SkipForward, Theater, RotateCcw
+  Captions, Maximize, PictureInPicture2, SkipBack, SkipForward, Theater, RotateCcw
 } from "lucide-react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import * as tus from "tus-js-client";
@@ -153,6 +153,16 @@ function VideoCard({ video, onPlay, onLike, onSave, onRepost, user, following, o
   </article>;
 }
 
+function formatDuration(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds < 0) return "0:00";
+  const total = Math.floor(seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return hours ? `${hours}:${pad(minutes)}:${pad(secs)}` : `${minutes}:${pad(secs)}`;
+}
+
 function VideoPlayer({ video, profile, onClose, notify, userId }: {
   video: VideoRow; profile: Profile | null; onClose: () => void;
   notify: (title: string, detail?: string, kind?: Notice["kind"]) => void; userId: string | null;
@@ -213,10 +223,12 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
     return () => { active = false; };
   }, [video.id, userId, playbackAttempt]);
   useEffect(() => {
+    if (videoElement.current) videoElement.current.playbackRate = playbackRate;
+  }, [playbackRate]);
+
+  useEffect(() => {
     const element = videoElement.current;
-    if (!element || !src) return;
-    element.playbackRate = playbackRate;
-    if (playbackType !== "hls") return;
+    if (!element || !src || playbackType !== "hls") return;
 
     const nativeHlsSupported = Boolean(element.canPlayType("application/vnd.apple.mpegurl"));
     const canUseNativeHls = nativeHlsSupported && ("ManagedMediaSource" in window || !Hls.isSupported());
@@ -283,7 +295,7 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
       element.removeAttribute("src");
       element.load();
     };
-  }, [src, playbackType, playbackRate]);
+  }, [src, playbackType]);
 
   useEffect(() => {
     const element = videoElement.current;
