@@ -207,8 +207,10 @@ begin
   if not exists (
     select 1 from public.videos v
     where v.id = p_video_id
-      and v.status = 'published'
-      and v.visibility in ('public', 'unlisted')
+      and (
+        (v.status = 'published' and v.visibility in ('public', 'unlisted'))
+        or v.creator_id = v_uid
+      )
   ) then
     raise exception 'Video is not available for watch tracking' using errcode = '42501';
   end if;
