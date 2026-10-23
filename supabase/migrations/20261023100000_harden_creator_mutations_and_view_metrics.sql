@@ -63,7 +63,7 @@ begin
       raise exception 'Video owner must match the signed-in user' using errcode = '42501';
     end if;
     if new.video_path not like v_uid::text || '/%' or position('..' in new.video_path) > 0 then
-      raise exception 'Original media must be stored in the owner's folder' using errcode = '42501';
+      raise exception 'Original media must be stored in the owner''s folder' using errcode = '42501';
     end if;
     if new.views_count <> 0 or new.published_at is not null then
       raise exception 'View counts and publication timestamps are server-managed' using errcode = '42501';
