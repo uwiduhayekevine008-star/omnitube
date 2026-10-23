@@ -74,7 +74,7 @@ export default function LiveScreen() {
         <SectionTitle title="Live & scheduled" detail="Discover who's on air and what's next." action={<Text style={styles.count}>{streams.length} rooms</Text>}/>
         {loading ? <ActivityIndicator color={theme.mint} style={{ marginVertical: 30 }}/> : null}
       </View>}
-      ListEmptyComponent={!loading ? <EmptyState icon="radio-outline" title="The stage is yours." detail="No public creator is live right now. Start a broadcast once LiveKit is configured." action={<ActionButton title="Start a broadcast" icon="radio-outline" onPress={() => setShowSetup(true)}/>}/> : null}
+      ListEmptyComponent={!loading ? <EmptyState icon="radio-outline" title="The stage is yours." detail="No public creator is live right now. Start a broadcast once LiveKit is configured." action={<ActionButton title="Start a broadcast" icon="radio-outline" onPress={() => setShowSetup(true)}/>}/> : undefined}
       ListFooterComponent={<View style={{height:25}}/>}/>
   </AppScreen>;
 }
