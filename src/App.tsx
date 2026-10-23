@@ -248,7 +248,7 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
   }, [src, playbackType]);
 
   const saveWatch = useCallback(async (seconds: number) => {
-    if (!userId || seconds < 1 || seconds - lastSaved.current < 10) return;
+    if (!userId || seconds < 1 || (lastSaved.current > 0 && seconds - lastSaved.current < 10)) return;
     lastSaved.current = seconds;
     const { error } = await supabase.rpc("record_video_watch", {
       p_video_id: video.id,
