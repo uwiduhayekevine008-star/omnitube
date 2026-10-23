@@ -115,11 +115,15 @@ Deno.serve(async (request: Request) => {
 
   try {
     const renditionObjects = await listBucketObjects(admin, "omnitube-renditions", renditionRoot);
+    const generatedPosterPath = auth.user.id + "/" + video.id + "-generated.jpg";
     const results = await Promise.all([
       admin.storage.from("omnitube-videos").remove([video.video_path]),
       video.thumbnail_path
         ? admin.storage.from("omnitube-thumbnails").remove([video.thumbnail_path])
         : Promise.resolve({ error: null }),
+      // Also remove a generated poster that may have been uploaded immediately
+      // before a concurrent delete cancelled its transcode job.
+      admin.storage.from("omnitube-thumbnails").remove([generatedPosterPath]),
     ]);
     if (results.some((result) => result.error)) {
       return respond(503, {
