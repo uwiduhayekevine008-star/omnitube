@@ -554,6 +554,7 @@ function App() {
   const [liveDescription, setLiveDescription] = useState("");
   const [selectedVideo, setSelectedVideo] = useState<VideoRow | null>(null);
   const [routeVideoId] = useState<string | null>(() => window.location.pathname.match(/^\/watch\/([0-9a-f-]{36})$/i)?.[1] || null);
+  const [routePostId] = useState<string | null>(() => window.location.pathname.match(/^\/community\/([0-9a-f-]{36})$/i)?.[1] || new URLSearchParams(window.location.search).get("post"));
   const [reportTarget, setReportTarget] = useState<{ type: "video" | "post"; id: string } | null>(null);
   const [room, setRoom] = useState<{ stream: StreamRow; token: string; broadcaster: boolean } | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -640,6 +641,10 @@ function App() {
     return () => { active = false; };
   }, [routeVideoId, user?.id, notify]);
 
+  useEffect(() => {
+    if (routePostId) setSection("posts");
+  }, [routePostId]);
+
   const loadVideos = useCallback(async () => {
     if (!isSupabaseConfigured) { setLoading(false); return; }
     setLoading(true);
@@ -693,7 +698,11 @@ function App() {
     if (section !== "posts") return;
     const { data, error } = await supabase.from("posts").select("id,creator_id,body,media_urls,visibility,created_at").eq("visibility", "public").order("created_at", { ascending: false }).limit(40);
     if (error) { notify("Could not load community posts", error.message, "error"); return; }
-    const rows = (data || []) as unknown as PostRow[];
+    let rows = (data || []) as unknown as PostRow[];
+    if (routePostId && !rows.some((row) => row.id === routePostId)) {
+      const target = await supabase.from("posts").select("id,creator_id,body,media_urls,visibility,created_at").eq("id", routePostId).eq("visibility", "public").maybeSingle();
+      if (target.data) rows = [target.data as unknown as PostRow, ...rows];
+    }
     const ids = Array.from(new Set(rows.map((row) => row.creator_id)));
     const [prof, reactions] = await Promise.all([
       ids.length ? supabase.from("profiles").select("id,username,display_name,avatar_url,bio,is_verified").in("id", ids) : Promise.resolve({ data: [] as any[] }),
@@ -703,7 +712,7 @@ function App() {
     const counts = new Map<string, number>();
     (reactions.data || []).forEach((reaction: any) => counts.set(reaction.post_id, (counts.get(reaction.post_id) || 0) + 1));
     setPosts(rows.map((row) => ({ ...row, creator: profileMap.get(row.creator_id), likes: counts.get(row.id) || 0 })));
-  }, [section, notify]);
+  }, [section, notify, routePostId]);
 
   const loadStreams = useCallback(async () => {
     if (section !== "live") return;
