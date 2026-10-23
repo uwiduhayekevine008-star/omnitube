@@ -14,7 +14,7 @@ type Profile = { id: string; username: string | null; display_name: string; avat
 type VideoRow = {
   id: string; creator_id: string; title: string; description: string; video_path: string;
   thumbnail_path: string | null; duration_seconds: number | null; visibility: string; kind: "video" | "short";
-  status: string; category: string; views_count: number; published_at: string | null; created_at: string;
+  status: string; category: string; views_count: number; published_at: string | null; created_at: string; allow_comments?: boolean;
   video_reactions?: { count: number }[]; comments?: { count: number }[]; creator?: Profile;
 };
 type PostRow = { id: string; creator_id: string; body: string; media_urls: string[]; visibility: string; created_at: string; creator?: Profile; likes?: number };
@@ -319,6 +319,45 @@ function UploadDialog({ userId, notify, onClose, onPublished }: {
   </Modal>;
 }
 
+function EditVideoDialog({ video, userId, onClose, onUpdated, notify }: {
+  video: VideoRow; userId: string; onClose: () => void; onUpdated: () => void;
+  notify: (title: string, detail?: string, kind?: Notice["kind"]) => void;
+}) {
+  const [title, setTitle] = useState(video.title);
+  const [description, setDescription] = useState(video.description || "");
+  const [visibility, setVisibility] = useState(video.visibility);
+  const [kind, setKind] = useState<"video" | "short">(video.kind);
+  const [category, setCategory] = useState(video.category || "Other");
+  const [allowComments, setAllowComments] = useState(video.allow_comments !== false);
+  const [busy, setBusy] = useState(false);
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!title.trim() || busy) return;
+    setBusy(true);
+    const { error } = await supabase.from("videos").update({
+      title: title.trim(), description: description.trim(), visibility, kind, category,
+      allow_comments: allowComments, updated_at: new Date().toISOString()
+    }).eq("id", video.id).eq("creator_id", userId).select("id").single();
+    setBusy(false);
+    if (error) notify("Video changes were not saved", error.message, "error");
+    else { notify("Video details updated.", undefined, "success"); onUpdated(); onClose(); }
+  };
+  return <Modal onClose={() => { if (!busy) onClose(); }} className="upload-modal">
+    <div className="modal-heading"><div><p className="eyebrow">CREATOR STUDIO / LIBRARY</p><h2>Edit video details.</h2><p className="muted">Update your title, description, visibility and viewer options without re-uploading the media.</p></div><button className="icon-btn" onClick={onClose} disabled={busy} aria-label="Close editor"><X /></button></div>
+    <form className="upload-form" onSubmit={(event) => void submit(event)}>
+      <div className="form-grid">
+        <div className="form-field wide"><label htmlFor="edit-video-title">Title</label><input id="edit-video-title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={180} required /></div>
+        <div className="form-field wide"><label htmlFor="edit-video-description">Description</label><textarea id="edit-video-description" rows={4} maxLength={5000} value={description} onChange={(event) => setDescription(event.target.value)} /></div>
+        <div className="form-field"><label htmlFor="edit-video-visibility">Audience</label><select id="edit-video-visibility" value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="public">Public — discoverable</option><option value="unlisted">Unlisted — link access</option><option value="private">Private — only you</option></select></div>
+        <div className="form-field"><label htmlFor="edit-video-kind">Format</label><select id="edit-video-kind" value={kind} onChange={(event) => setKind(event.target.value as "video" | "short")}><option value="video">Long-form video</option><option value="short">Short-form video</option></select></div>
+        <div className="form-field"><label htmlFor="edit-video-category">Category</label><select id="edit-video-category" value={category} onChange={(event) => setCategory(event.target.value)}>{["Other","Education","Gaming","Music","Technology","Lifestyle","Science","Sports","News","Comedy","Film"].map((item) => <option key={item}>{item}</option>)}</select></div>
+        <div className="form-field"><label htmlFor="edit-comments">Viewer interaction</label><select id="edit-comments" value={allowComments ? "on" : "off"} onChange={(event) => setAllowComments(event.target.value === "on")}><option value="on">Comments enabled</option><option value="off">Comments disabled</option></select></div>
+      </div>
+      <div className="modal-footer"><button type="button" className="btn btn-quiet" onClick={onClose} disabled={busy}>Cancel</button><button type="submit" className="btn btn-primary" disabled={busy || !title.trim()}>{busy ? "Saving…" : <><Check size={16} /> Save changes</>}</button></div>
+    </form>
+  </Modal>;
+}
+
 function LiveRoomPane({ stream, token, serverUrl, broadcaster, userId, profile, onClose, notify }: {
   stream: StreamRow; token: string; serverUrl: string; broadcaster: boolean; userId: string; profile: Profile | null;
   onClose: () => void; notify: (title: string, detail?: string, kind?: Notice["kind"]) => void;
@@ -504,6 +543,9 @@ function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [followingIds, setFollowingIds] = useState<string[]>([]);
   const [libraryVideos, setLibraryVideos] = useState<VideoRow[]>([]);
+  const [myVideos, setMyVideos] = useState<VideoRow[]>([]);
+  const [studioLoading, setStudioLoading] = useState(false);
+  const [editingVideo, setEditingVideo] = useState<VideoRow | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const livekitUrl = (import.meta.env.VITE_LIVEKIT_URL as string | undefined) || "";
 
@@ -566,6 +608,24 @@ function App() {
   const activeRef = useRef(true);
   useEffect(() => { activeRef.current = true; void loadVideos(); return () => { activeRef.current = false; }; }, [loadVideos]);
 
+  const loadStudioVideos = useCallback(async () => {
+    if (section !== "studio" || !user?.id) {
+      if (!user?.id) setMyVideos([]);
+      return;
+    }
+    setStudioLoading(true);
+    const { data, error } = await supabase.from("videos")
+      .select("id,creator_id,title,description,video_path,thumbnail_path,duration_seconds,visibility,kind,status,category,views_count,published_at,created_at,allow_comments")
+      .eq("creator_id", user.id).order("created_at", { ascending: false }).limit(100);
+    if (error) {
+      notify("Could not load your uploads", error.message, "error");
+      setMyVideos([]);
+    } else {
+      setMyVideos(((data || []) as unknown as VideoRow[]).map((video) => ({ ...video, creator: profile || undefined })));
+    }
+    setStudioLoading(false);
+  }, [section, user?.id, profile, notify]);
+
   const loadPosts = useCallback(async () => {
     if (section !== "posts") return;
     const { data, error } = await supabase.from("posts").select("id,creator_id,body,media_urls,visibility,created_at").eq("visibility", "public").order("created_at", { ascending: false }).limit(40);
@@ -615,13 +675,30 @@ function App() {
     else setNotifications(data || []);
   }, [section, user?.id, notify]);
 
-  useEffect(() => { void loadPosts(); void loadStreams(); void loadLibrary(); void loadNotifications(); }, [loadPosts, loadStreams, loadLibrary, loadNotifications]);
+  useEffect(() => { void loadPosts(); void loadStreams(); void loadLibrary(); void loadNotifications(); void loadStudioVideos(); }, [loadPosts, loadStreams, loadLibrary, loadNotifications, loadStudioVideos]);
 
   const openVideo = (video: VideoRow) => setSelectedVideo(video);
   const requestReport = (type: "video" | "post", id: string) => {
     if (!user?.id) { setAuthOpen(true); return; }
     setReportTarget({ type, id });
   };
+  const deleteVideo = async (video: VideoRow) => {
+    if (!user?.id || !window.confirm("Permanently delete “" + video.title + "”? This also removes its comments, reactions and playlist references.")) return;
+    const { error } = await supabase.from("videos").delete().eq("id", video.id).eq("creator_id", user.id);
+    if (error) { notify("Video was not deleted", error.message, "error"); return; }
+    const objects = await Promise.all([
+      supabase.storage.from("omnitube-videos").remove([video.video_path]),
+      video.thumbnail_path ? supabase.storage.from("omnitube-assets").remove([video.thumbnail_path]) : Promise.resolve({ error: null })
+    ]);
+    setMyVideos((all) => all.filter((item) => item.id !== video.id));
+    setVideos((all) => all.filter((item) => item.id !== video.id));
+    setLibraryVideos((all) => all.filter((item) => item.id !== video.id));
+    if (selectedVideo?.id === video.id) setSelectedVideo(null);
+    if (objects.some((result) => result.error)) {
+      notify("Video record deleted", "The record is gone, but one media object could not be removed. Review storage for orphaned files.", "error");
+    } else notify("Video deleted.", undefined, "success");
+  };
+
   const toggleFollow = async (creatorId: string) => {
     if (!user?.id) { setAuthOpen(true); return; }
     if (creatorId === user.id) { setSection("studio"); return; }
@@ -767,12 +844,21 @@ function App() {
 
         {section === "studio" && <div className="studio-grid">
           <div className="studio-welcome"><div className="studio-avatar"><Avatar profile={profile} size="lg" /></div><div><p className="eyebrow">WELCOME BACK</p><h3>{profile?.display_name || user?.email?.split("@")[0] || "Creator"}</h3><p className="muted">This is your control room. Your real video and audience data appears here as you publish.</p></div><button className="btn btn-primary" onClick={() => setUploadOpen(true)}><Upload size={16} /> Upload video</button></div>
-          <div className="studio-stat"><span>Published videos</span><strong>{formatCount(videos.filter((item) => item.creator_id === user?.id).length)}</strong><small>Loaded from your current feed</small></div>
+          <div className="studio-stat"><span>Published videos</span><strong>{formatCount(myVideos.filter((item) => item.status === "published").length)}</strong><small>Your actual creator library</small></div>
           <div className="studio-stat"><span>Following</span><strong>{formatCount(followingIds.length)}</strong><small>Creators in your network</small></div>
-          <div className="studio-stat"><span>Active live rooms</span><strong>{formatCount(streams.filter((item) => item.creator_id === user?.id && item.status === "live").length)}</strong><small>Configured live broadcasts</small></div>
+          <div className="studio-stat"><span>Published shorts</span><strong>{formatCount(myVideos.filter((item) => item.status === "published" && item.kind === "short").length)}</strong><small>Short-form videos on your channel</small></div>
           <div className="studio-action-card"><div className="studio-action-icon"><VideoIcon /></div><h3>Publish a video</h3><p>Resumable uploads, thumbnail support, visibility controls and server-side publication validation.</p><button className="btn btn-quiet" onClick={() => setUploadOpen(true)}>Open upload studio <ChevronDown size={15} /></button></div>
           <div className="studio-action-card"><div className="studio-action-icon violet"><Radio /></div><h3>Go live</h3><p>Launch a low-latency live room with camera, microphone and subscriber viewing through LiveKit.</p><button className="btn btn-quiet" onClick={() => setLiveSetup(true)}>Configure broadcast <ChevronDown size={15} /></button></div>
           <div className="studio-action-card"><div className="studio-action-icon blue"><MessageCircle /></div><h3>Build a community</h3><p>Publish updates and conversations that live alongside your videos.</p><button className="btn btn-quiet" onClick={() => chooseSection("posts")}>Open community <ChevronDown size={15} /></button></div>
+          <div className="studio-library-panel"><div className="studio-library-heading"><div><p className="eyebrow">YOUR CONTENT</p><h3>Manage your uploads</h3></div><span>{myVideos.length} {myVideos.length === 1 ? "video" : "videos"}</span></div>
+            {studioLoading ? <div className="studio-library-loading"><span className="spinner" /> Loading your library…</div> : myVideos.map((item) => <article className="studio-video-row" key={item.id}>
+              <div className="studio-video-thumb" style={storagePublicUrl(item.thumbnail_path) ? { backgroundImage: "url(" + storagePublicUrl(item.thumbnail_path) + ")" } : undefined}><VideoIcon size={18} /></div>
+              <div className="studio-video-copy"><strong>{item.title}</strong><span>{item.status.toUpperCase()} · {item.visibility} · {item.kind === "short" ? "Short" : "Video"}</span><small>{formatCount(item.views_count)} views · {timeAgo(item.published_at || item.created_at)}</small></div>
+              <button className="btn btn-quiet studio-video-edit" onClick={() => setEditingVideo(item)} disabled={item.status === "failed"}><Settings size={14} /> Edit</button>
+              <button className="icon-btn studio-video-delete" onClick={() => void deleteVideo(item)} aria-label={"Delete " + item.title} title="Delete video"><X size={16} /></button>
+            </article>)}
+            {!studioLoading && myVideos.length === 0 && <div className="studio-library-empty"><VideoIcon size={22} /><p>Your creator library is empty. Upload a video to start building your channel.</p></div>}
+          </div>
         </div>}
 
         {section === "posts" && user && <PostComposer userId={user.id} notify={notify} onCreated={() => void loadPosts()} />}
@@ -801,7 +887,8 @@ function App() {
     {sidebarOpen && <button className="mobile-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" />}
     {authOpen && <AuthDialog onClose={() => setAuthOpen(false)} notify={notify} />}
     {reportTarget && user?.id && <ReportDialog targetType={reportTarget.type} targetId={reportTarget.id} userId={user.id} onClose={() => setReportTarget(null)} notify={notify} />}
-    {uploadOpen && user?.id && <UploadDialog userId={user.id} notify={notify} onClose={() => setUploadOpen(false)} onPublished={() => { void loadVideos(); if (section === "studio") void loadVideos(); }} />}
+    {editingVideo && user?.id && <EditVideoDialog video={editingVideo} userId={user.id} onClose={() => setEditingVideo(null)} onUpdated={() => { void loadStudioVideos(); void loadVideos(); }} notify={notify} />}
+    {uploadOpen && user?.id && <UploadDialog userId={user.id} notify={notify} onClose={() => setUploadOpen(false)} onPublished={() => { void loadVideos(); if (section === "studio") void loadStudioVideos(); }} />}
     {selectedVideo && <VideoPlayer key={selectedVideo.id} video={selectedVideo} profile={profile} onClose={() => setSelectedVideo(null)} notify={notify} userId={user?.id || null} />}
     {liveSetup && <Modal onClose={() => { if (!uploadBusy) setLiveSetup(false); }} className="live-setup-modal"><div className="modal-heading"><div><p className="eyebrow">ON-AIR STUDIO</p><h2>Start a live broadcast.</h2><p className="muted">An authorized LiveKit room will be created for your creator identity.</p></div><button className="icon-btn" onClick={() => setLiveSetup(false)}><X /></button></div><form className="stack-form" onSubmit={(event) => void publishLive(event)}><label htmlFor="stream-title">Stream title</label><input id="stream-title" value={liveTitle} onChange={(event) => setLiveTitle(event.target.value)} required maxLength={180} placeholder="What are we getting into today?" /><label htmlFor="stream-description">Description</label><textarea id="stream-description" value={liveDescription} onChange={(event) => setLiveDescription(event.target.value)} rows={3} maxLength={3000} placeholder="Tell viewers what this live session is about." /><div className="provider-info"><Radio size={17} /><div><strong>LiveKit realtime media</strong><span>Requires VITE_LIVEKIT_URL and server-only LIVEKIT_API_KEY / LIVEKIT_API_SECRET in Supabase Edge Function secrets.</span></div></div><div className="modal-footer"><button type="button" className="btn btn-quiet" onClick={() => setLiveSetup(false)} disabled={uploadBusy}>Cancel</button><button type="submit" className="btn btn-primary" disabled={uploadBusy || !liveTitle.trim()}>{uploadBusy ? <><span className="spinner" /> Starting…</> : <><Radio size={16} /> Start broadcast</>}</button></div></form></Modal>}
     {room && livekitUrl && <LiveRoomPane key={room.stream.id} stream={room.stream} token={room.token} serverUrl={livekitUrl} broadcaster={room.broadcaster} userId={user?.id || ""} profile={profile} onClose={() => void endRoom()} notify={notify} />}
