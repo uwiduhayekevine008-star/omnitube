@@ -331,12 +331,10 @@ function LiveRoomPane({ stream, token, serverUrl, broadcaster, onClose, notify }
     const room = new Room({ adaptiveStream: true, dynacast: true });
     roomRef.current = room;
     const mount = (track: Track) => {
-      const elements = track.attach();
-      elements.forEach((element) => {
-        element.classList.add(element instanceof HTMLVideoElement ? "room-video" : "room-audio");
-        if (element instanceof HTMLVideoElement) element.playsInline = true;
-        mediaRef.current?.appendChild(element);
-      });
+      const element = track.attach();
+      element.classList.add(element instanceof HTMLVideoElement ? "room-video" : "room-audio");
+      if (element instanceof HTMLVideoElement) element.playsInline = true;
+      mediaRef.current?.appendChild(element);
     };
     const unmount = (track: Track) => track.detach().forEach((element) => element.remove());
     room.on(RoomEvent.TrackSubscribed, mount);
@@ -588,7 +586,7 @@ function App() {
       notify("Broadcast authorization failed", tokenError?.message || data?.error || "Configure LiveKit server credentials in Supabase.", "error"); return;
     }
     setLiveSetup(false); setLiveTitle(""); setLiveDescription("");
-    setRoom({ stream: { ...created, creator: profile }, token: data.token as string, broadcaster: true });
+    setRoom({ stream: { ...created, creator: profile || undefined }, token: data.token as string, broadcaster: true });
   };
 
   const joinLive = async (stream: StreamRow) => {
