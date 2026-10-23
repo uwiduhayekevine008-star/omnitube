@@ -45,7 +45,7 @@ export default function DiscoverScreen() {
       if (feed === "Shorts") request = request.eq("kind", "short") as typeof request;
       if (feed === "Videos") request = request.eq("kind", "video") as typeof request;
       if (topic !== "For you") request = request.eq("category", topic) as typeof request;
-      const q = query.trim().replace(/[,%()]/g, " ").replace(/\\s+/g, " ").slice(0, 90);
+      const q = query.trim().replace(/[,%()]/g, " ").replace(/\s+/g, " ").slice(0, 90);
       if (q) request = request.or("title.ilike.%" + q + "%,description.ilike.%" + q + "%") as typeof request;
 
       if (feed === "Following") {
