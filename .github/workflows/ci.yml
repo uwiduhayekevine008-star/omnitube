@@ -1,13 +1,17 @@
 name: Build and typecheck
+
 on:
   push:
     branches: [main, develop]
   pull_request:
     branches: [main, develop]
+
 permissions:
   contents: read
+
 jobs:
-  verify:
+  web-verify:
+    name: Web · TypeScript and production build
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -18,3 +22,28 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run build
+
+  mobile-verify:
+    name: Expo · TypeScript and Android export
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/mobile
+    env:
+      EXPO_PUBLIC_SUPABASE_URL: https://mrrndahmjfwiugjnjthi.supabase.co
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+      EXPO_PUBLIC_LIVEKIT_URL: wss://YOUR_LIVEKIT_HOST
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install mobile dependencies
+        run: npm install --no-audit --no-fund
+      - name: Validate native dependencies
+        run: npx expo install --check
+      - name: Typecheck mobile app
+        run: npm run typecheck
+      - name: Export Android app bundle
+        run: npx expo export --platform android --output-dir dist-ci
