@@ -22,6 +22,8 @@ type StreamRow = { id: string; creator_id: string; title: string; description: s
 type StreamMessage = { id: string; stream_id: string; user_id: string; body: string; created_at: string; author?: Profile | null };
 type Notice = { id: string; title: string; detail?: string; kind?: "success" | "error" | "info" };
 
+const WEB_FEED_PAGE_SIZE = 36;
+
 const NAV: { id: Section; label: string; icon: typeof Home }[] = [
   { id: "home", label: "Discover", icon: Home },
   { id: "trending", label: "Trending", icon: Flame },
@@ -547,13 +549,15 @@ function App() {
   const [query, setQuery] = useState("");
   const [appliedQuery, setAppliedQuery] = useState("");
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMoreVideos, setHasMoreVideos] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
   const [uploadOpen, setUploadOpen] = useState(false);
   const [liveSetup, setLiveSetup] = useState(false);
   const [liveTitle, setLiveTitle] = useState("");
   const [liveDescription, setLiveDescription] = useState("");
   const [selectedVideo, setSelectedVideo] = useState<VideoRow | null>(null);
-  const [routeVideoId] = useState<string | null>(() => window.location.pathname.match(/^\/watch\/([0-9a-f-]{36})$/i)?.[1] || null);
+  const [routeVideoId, setRouteVideoId] = useState<string | null>(() => window.location.pathname.match(/^\/watch\/([0-9a-f-]{36})$/i)?.[1] || null);
   const [routePostId] = useState<string | null>(() => window.location.pathname.match(/^\/community\/([0-9a-f-]{36})$/i)?.[1] || new URLSearchParams(window.location.search).get("post"));
   const [reportTarget, setReportTarget] = useState<{ type: "video" | "post"; id: string } | null>(null);
   const [room, setRoom] = useState<{ stream: StreamRow; token: string; broadcaster: boolean } | null>(null);
@@ -566,6 +570,8 @@ function App() {
   const [editingVideo, setEditingVideo] = useState<VideoRow | null>(null);
   const [uploadBusy, setUploadBusy] = useState(false);
   const livekitUrl = (import.meta.env.VITE_LIVEKIT_URL as string | undefined) || "";
+  const videosRequestId = useRef(0);
+  const loadingMoreRef = useRef(false);
 
   const notify = useCallback((title: string, detail?: string, kind: Notice["kind"] = "info") => {
     setNotice({ id: crypto.randomUUID(), title, detail, kind });
@@ -579,6 +585,16 @@ function App() {
       if (mounted) setUser(session?.user || null);
     });
     return () => { mounted = false; data.subscription.unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    const syncWatchLocation = () => {
+      const nextId = window.location.pathname.match(/^\\/watch\\/([0-9a-f-]{36})$/i)?.[1] || null;
+      setRouteVideoId(nextId);
+      setSelectedVideo((current) => current?.id === nextId ? current : null);
+    };
+    window.addEventListener("popstate", syncWatchLocation);
+    return () => window.removeEventListener("popstate", syncWatchLocation);
   }, []);
 
   useEffect(() => {
@@ -646,35 +662,90 @@ function App() {
   }, [routePostId]);
 
   const loadVideos = useCallback(async () => {
-    if (!isSupabaseConfigured) { setLoading(false); return; }
+    const requestId = ++videosRequestId.current;
+    loadingMoreRef.current = false;
+    setLoadingMore(false);
+    setHasMoreVideos(false);
+    if (!isSupabaseConfigured) { setVideos([]); setLoading(false); return; }
     setLoading(true);
     let request = supabase.from("videos").select("id,creator_id,title,description,video_path,thumbnail_path,duration_seconds,visibility,kind,status,category,views_count,published_at,created_at,video_reactions(count),comments(count)")
       .eq("status", "published").eq("visibility", "public");
     if (section === "shorts") request = request.eq("kind", "short") as typeof request;
     if (section === "subscriptions") {
-      if (!user?.id || followingIds.length === 0) { setVideos([]); setLoading(false); return; }
+      if (!user?.id || followingIds.length === 0) {
+        if (requestId === videosRequestId.current) { setVideos([]); setLoading(false); }
+        return;
+      }
       request = request.in("creator_id", followingIds) as typeof request;
     }
     if (appliedQuery.trim()) {
-      const safe = appliedQuery.trim().replace(/[,%()]/g, " ").replace(/\s+/g, " ").slice(0, 100);
+      const safe = appliedQuery.trim().replace(/[,%()]/g, " ").replace(/\\s+/g, " ").slice(0, 100);
       if (safe) request = request.or("title.ilike.%" + safe + "%,description.ilike.%" + safe + "%") as typeof request;
     }
     if (section === "trending") request = request.order("views_count", { ascending: false }).order("published_at", { ascending: false }) as typeof request;
     else request = request.order("published_at", { ascending: false }) as typeof request;
-    const { data, error } = await request.limit(section === "shorts" ? 36 : 36);
-    if (error) { setVideos([]); notify("Could not load videos", error.message, "error"); setLoading(false); return; }
-    const rows = (data || []) as unknown as VideoRow[];
+    const { data, error } = await request.range(0, WEB_FEED_PAGE_SIZE);
+    if (requestId !== videosRequestId.current) return;
+    if (error) {
+      setVideos([]);
+      notify("Could not load videos", error.message, "error");
+      setLoading(false);
+      return;
+    }
+    const fetchedRows = (data || []) as unknown as VideoRow[];
+    const hasMore = fetchedRows.length > WEB_FEED_PAGE_SIZE;
+    const rows = fetchedRows.slice(0, WEB_FEED_PAGE_SIZE);
     const ids = Array.from(new Set(rows.map((row) => row.creator_id)));
     const prof = ids.length ? await supabase.from("profiles").select("id,username,display_name,avatar_url,bio,is_verified").in("id", ids) : { data: [] as any[] };
+    if (requestId !== videosRequestId.current) return;
     const profileMap = new Map((prof.data || []).map((person: any) => [person.id, person]));
-    if (activeRef.current) {
-      setVideos(rows.map((row) => ({ ...row, creator: profileMap.get(row.creator_id) })));
-      setLoading(false);
-    }
+    setVideos(rows.map((row) => ({ ...row, creator: profileMap.get(row.creator_id) })));
+    setHasMoreVideos(hasMore);
+    setLoading(false);
   }, [section, appliedQuery, user?.id, followingIds, notify]);
 
-  const activeRef = useRef(true);
-  useEffect(() => { activeRef.current = true; void loadVideos(); return () => { activeRef.current = false; }; }, [loadVideos]);
+  const loadMoreVideos = useCallback(async () => {
+    if (loadingMoreRef.current || loading || !hasMoreVideos || section === "library" ||
+        !["home", "trending", "shorts", "subscriptions"].includes(section)) return;
+    const requestId = videosRequestId.current;
+    const offset = videos.length;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    let request = supabase.from("videos").select("id,creator_id,title,description,video_path,thumbnail_path,duration_seconds,visibility,kind,status,category,views_count,published_at,created_at,video_reactions(count),comments(count)")
+      .eq("status", "published").eq("visibility", "public");
+    if (section === "shorts") request = request.eq("kind", "short") as typeof request;
+    if (section === "subscriptions") request = request.in("creator_id", followingIds) as typeof request;
+    if (appliedQuery.trim()) {
+      const safe = appliedQuery.trim().replace(/[,%()]/g, " ").replace(/\\s+/g, " ").slice(0, 100);
+      if (safe) request = request.or("title.ilike.%" + safe + "%,description.ilike.%" + safe + "%") as typeof request;
+    }
+    if (section === "trending") request = request.order("views_count", { ascending: false }).order("published_at", { ascending: false }) as typeof request;
+    else request = request.order("published_at", { ascending: false }) as typeof request;
+    const { data, error } = await request.range(offset, offset + WEB_FEED_PAGE_SIZE);
+    if (requestId !== videosRequestId.current) return;
+    if (error) {
+      notify("Could not load more videos", error.message, "error");
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+      return;
+    }
+    const fetchedRows = (data || []) as unknown as VideoRow[];
+    const hasMore = fetchedRows.length > WEB_FEED_PAGE_SIZE;
+    const rows = fetchedRows.slice(0, WEB_FEED_PAGE_SIZE);
+    const ids = Array.from(new Set(rows.map((row) => row.creator_id)));
+    const prof = ids.length ? await supabase.from("profiles").select("id,username,display_name,avatar_url,bio,is_verified").in("id", ids) : { data: [] as any[] };
+    if (requestId !== videosRequestId.current) return;
+    const profileMap = new Map((prof.data || []).map((person: any) => [person.id, person]));
+    setVideos((current) => {
+      const existingIds = new Set(current.map((row) => row.id));
+      return [...current, ...rows.filter((row) => !existingIds.has(row.id)).map((row) => ({ ...row, creator: profileMap.get(row.creator_id) }))];
+    });
+    setHasMoreVideos(hasMore);
+    loadingMoreRef.current = false;
+    setLoadingMore(false);
+  }, [section, appliedQuery, followingIds, videos.length, hasMoreVideos, loading, notify]);
+
+  useEffect(() => { void loadVideos(); }, [loadVideos]);
 
   const loadStudioVideos = useCallback(async () => {
     if (section !== "studio" || !user?.id) {
@@ -749,7 +820,26 @@ function App() {
 
   useEffect(() => { void loadPosts(); void loadStreams(); void loadLibrary(); void loadNotifications(); void loadStudioVideos(); }, [loadPosts, loadStreams, loadLibrary, loadNotifications, loadStudioVideos]);
 
-  const openVideo = (video: VideoRow) => setSelectedVideo(video);
+  const openVideo = (video: VideoRow) => {
+    const nextPath = "/watch/" + video.id;
+    if (window.location.pathname !== nextPath) {
+      window.history.pushState({ ...(window.history.state || {}), omnitubeWatch: true }, "", nextPath);
+    }
+    setRouteVideoId(video.id);
+    setSelectedVideo(video);
+  };
+  const closeVideo = () => {
+    const state = window.history.state as { omnitubeWatch?: boolean } | null;
+    if (routeVideoId && state?.omnitubeWatch && window.location.pathname === "/watch/" + routeVideoId) {
+      window.history.back();
+      return;
+    }
+    if (routeVideoId) {
+      window.history.replaceState({}, "", "/");
+      setRouteVideoId(null);
+    }
+    setSelectedVideo(null);
+  };
   const requestReport = (type: "video" | "post", id: string) => {
     if (!user?.id) { setAuthOpen(true); return; }
     setReportTarget({ type, id });
@@ -954,7 +1044,7 @@ function App() {
 
         {(section === "home" || section === "trending" || section === "shorts" || section === "subscriptions" || section === "library") && !needsLoginForCurrentSection && <>{section === "shorts" && <div className="shorts-intro"><Clapperboard size={17} /><span>Quick stories from creators. Tap any short to watch in the full player.</span></div>}
           {loading ? <div className="loading-grid">{Array.from({ length: section === "shorts" ? 6 : 8 }, (_, i) => <div className="video-skeleton" key={i}><div /><span /><small /></div>)}</div> :
-            contentVideos.length > 0 ? <div className={"video-grid " + (section === "shorts" ? "shorts-grid" : "")}>{contentVideos.map((video) => <VideoCard key={video.id} video={video} onPlay={() => openVideo(video)} onLike={() => void likeVideo(video)} onSave={() => void saveVideo(video)} onRepost={() => void repostVideo(video)} user={Boolean(user)} following={followingIds.includes(video.creator_id)} onFollow={() => void toggleFollow(video.creator_id)} onReport={() => requestReport("video", video.id)} />)}</div> :
+            contentVideos.length > 0 ? <><div className={"video-grid " + (section === "shorts" ? "shorts-grid" : "")}>{contentVideos.map((video) => <VideoCard key={video.id} video={video} onPlay={() => openVideo(video)} onLike={() => void likeVideo(video)} onSave={() => void saveVideo(video)} onRepost={() => void repostVideo(video)} user={Boolean(user)} following={followingIds.includes(video.creator_id)} onFollow={() => void toggleFollow(video.creator_id)} onReport={() => requestReport("video", video.id)} />)}</div>{section !== "library" && hasMoreVideos && <div className="feed-pagination"><button className="btn btn-quiet" onClick={() => void loadMoreVideos()} disabled={loadingMore || loading}>{loadingMore ? <><span className="spinner" /> Loading more…</> : <>Load more videos <ArrowDownUp size={15} /></>}</button><span>{contentVideos.length} videos loaded</span></div>}</> :
               <EmptyState icon={section === "shorts" ? Clapperboard : section === "library" ? Library : section === "subscriptions" ? Users : section === "trending" ? TrendingUp : Search} title={section === "library" ? "Your Watch later list is empty." : section === "subscriptions" ? "Your following feed is ready for its first creator." : appliedQuery ? "No videos match this search." : section === "shorts" ? "No shorts published yet." : section === "trending" ? "Nothing trending just yet." : "A universe ready to be discovered."} detail={section === "library" ? "Save videos from the action menu to keep them close." : section === "subscriptions" ? "Find creators and follow them to make this space yours." : appliedQuery ? "Try another title, topic, or creator keyword." : section === "shorts" ? "Shorts from real creators will appear here when published." : "Publish the first video to begin filling your real discovery feed."} action={section !== "library" && section !== "subscriptions" ? <button className="btn btn-primary" onClick={() => { if (!user) setAuthOpen(true); else setUploadOpen(true); }}><Upload size={15} /> Upload first video</button> : undefined} />}
         </>}
 
@@ -967,7 +1057,7 @@ function App() {
     {reportTarget && user?.id && <ReportDialog targetType={reportTarget.type} targetId={reportTarget.id} userId={user.id} onClose={() => setReportTarget(null)} notify={notify} />}
     {editingVideo && user?.id && <EditVideoDialog video={editingVideo} userId={user.id} onClose={() => setEditingVideo(null)} onUpdated={() => { void loadStudioVideos(); void loadVideos(); }} notify={notify} />}
     {uploadOpen && user?.id && <UploadDialog userId={user.id} notify={notify} onClose={() => setUploadOpen(false)} onPublished={() => { void loadVideos(); if (section === "studio") void loadStudioVideos(); }} />}
-    {selectedVideo && <VideoPlayer key={selectedVideo.id} video={selectedVideo} profile={profile} onClose={() => setSelectedVideo(null)} notify={notify} userId={user?.id || null} />}
+    {selectedVideo && <VideoPlayer key={selectedVideo.id} video={selectedVideo} profile={profile} onClose={closeVideo} notify={notify} userId={user?.id || null} />}
     {liveSetup && <Modal onClose={() => { if (!uploadBusy) setLiveSetup(false); }} className="live-setup-modal"><div className="modal-heading"><div><p className="eyebrow">ON-AIR STUDIO</p><h2>Start a live broadcast.</h2><p className="muted">An authorized LiveKit room will be created for your creator identity.</p></div><button className="icon-btn" onClick={() => setLiveSetup(false)}><X /></button></div><form className="stack-form" onSubmit={(event) => void publishLive(event)}><label htmlFor="stream-title">Stream title</label><input id="stream-title" value={liveTitle} onChange={(event) => setLiveTitle(event.target.value)} required maxLength={180} placeholder="What are we getting into today?" /><label htmlFor="stream-description">Description</label><textarea id="stream-description" value={liveDescription} onChange={(event) => setLiveDescription(event.target.value)} rows={3} maxLength={3000} placeholder="Tell viewers what this live session is about." /><div className="provider-info"><Radio size={17} /><div><strong>LiveKit realtime media</strong><span>Requires VITE_LIVEKIT_URL and server-only LIVEKIT_API_KEY / LIVEKIT_API_SECRET in Supabase Edge Function secrets.</span></div></div><div className="modal-footer"><button type="button" className="btn btn-quiet" onClick={() => setLiveSetup(false)} disabled={uploadBusy}>Cancel</button><button type="submit" className="btn btn-primary" disabled={uploadBusy || !liveTitle.trim()}>{uploadBusy ? <><span className="spinner" /> Starting…</> : <><Radio size={16} /> Start broadcast</>}</button></div></form></Modal>}
     {room && livekitUrl && <LiveRoomPane key={room.stream.id} stream={room.stream} token={room.token} serverUrl={livekitUrl} broadcaster={room.broadcaster} userId={user?.id || ""} profile={profile} onClose={() => void endRoom()} notify={notify} />}
     {notice && <div className={"toast toast-" + (notice.kind || "info")} role="status"><span className="toast-icon">{notice.kind === "success" ? <Check size={17} /> : notice.kind === "error" ? <ShieldAlert size={17} /> : <Sparkles size={17} />}</span><div><strong>{notice.title}</strong>{notice.detail && <p>{notice.detail}</p>}</div><button className="icon-btn tiny" onClick={() => setNotice(null)} aria-label="Dismiss notification"><X size={16} /></button></div>}
