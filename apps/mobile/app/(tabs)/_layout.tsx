@@ -11,7 +11,7 @@ export default function TabLayout() {
     tabBarActiveTintColor: theme.mint, tabBarInactiveTintColor: theme.subtle,
     tabBarStyle: { backgroundColor: "#0D1018", borderTopColor: theme.line, height: 62, paddingTop: 7, paddingBottom: 7, elevation: 0 },
     tabBarLabelStyle: { fontSize: 9, fontWeight: "800", marginTop: 1 },
-    tabBarIcon: ({ color, size, focused }) => <Ionicons name={icons[route.name] || "ellipse"} size={focused ? size + 1 : size} color={color} />,
+    tabBarIcon: ({ color, size, focused }) => <Ionicons name={icons[route.name] || "ellipse"} size={focused ? size + 1 : size} color={String(color)} />,
   })}>
     <Tabs.Screen name="index" options={{ title: "Discover" }} />
     <Tabs.Screen name="shorts" options={{ title: "Shorts" }} />
