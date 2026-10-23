@@ -121,7 +121,11 @@ export default function WatchScreen() {
 
   const repost = async () => {
     if (!video || !user) { Alert.alert("Sign in to repost", "Reposts help creators reach more people."); return; }
-    const { error } = await supabase.from("reposts").upsert({ video_id: video.id, user_id: user.id }, { onConflict: "video_id,user_id" });
+    const { data: existing, error: lookupError } = await supabase.from("reposts")
+      .select("id").eq("video_id", video.id).eq("user_id", user.id).maybeSingle();
+    if (lookupError) { Alert.alert("Could not check repost", lookupError.message); return; }
+    if (existing) { Alert.alert("Already reposted", "This video is already in your repost history."); return; }
+    const { error } = await supabase.from("reposts").insert({ video_id: video.id, user_id: user.id });
     Alert.alert(error ? "Could not repost" : "Reposted", error?.message || "Shared with your creator network.");
   };
 
