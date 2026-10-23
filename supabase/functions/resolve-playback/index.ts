@@ -31,6 +31,11 @@ function base64UrlDecode(value: string): Uint8Array {
   const binary = atob(base64);
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
+function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer as ArrayBuffer;
+}
 async function ticketKey(secret: string, usage: KeyUsage[]) {
   return await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, usage);
 }
@@ -45,7 +50,7 @@ async function verifyTicket(token: string, secret: string): Promise<PlaybackTick
   if (!payload || !signature || extra) return null;
   try {
     const key = await ticketKey(secret, ["verify"]);
-    const valid = await crypto.subtle.verify("HMAC", key, base64UrlDecode(signature), encoder.encode(payload));
+    const valid = await crypto.subtle.verify("HMAC", key, asArrayBuffer(base64UrlDecode(signature)), asArrayBuffer(encoder.encode(payload)));
     if (!valid) return null;
     const ticket = JSON.parse(new TextDecoder().decode(base64UrlDecode(payload))) as PlaybackTicket;
     if (ticket.v !== 1 || typeof ticket.videoId !== "string" ||
