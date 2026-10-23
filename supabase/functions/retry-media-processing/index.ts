@@ -57,12 +57,14 @@ Deno.serve(async (request: Request) => {
 
   // Make the video claimable only after the state is updated. The worker's claim
   // query requires media_status='queued'; failed retries are safe to invoke again.
-  const { error: stateError } = await admin.from("videos").update({
+  const { data: queuedVideo, error: stateError } = await admin.from("videos").update({
     media_status: "queued",
     playback_manifest_path: null,
     updated_at: new Date().toISOString(),
-  }).eq("id", video.id).eq("creator_id", auth.user.id).eq("status", "published").eq("media_status", "failed");
+  }).eq("id", video.id).eq("creator_id", auth.user.id).eq("status", "published").eq("media_status", "failed")
+    .select("id").maybeSingle();
   if (stateError) return respond(503, { error: "Could not reset the media state; retry the request safely" });
+  if (!queuedVideo) return respond(409, { error: "This video's media state changed during the retry request. Refresh Creator Studio and try again if it is still failed." });
 
   const now = new Date().toISOString();
   const { error: queueError } = await admin.from("media_processing_jobs").upsert({
