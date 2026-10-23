@@ -24,13 +24,24 @@ export async function getSignedThumbnail(path: string | null | undefined): Promi
   const { data, error } = await supabase.storage.from("omnitube-thumbnails").createSignedUrl(path, 3600);
   return error ? null : data.signedUrl;
 }
-export async function resolvePlayback(videoId: string): Promise<string> {
+export type PlaybackSource = {
+  url: string;
+  type: "hls" | "file";
+  expiresIn?: number;
+};
+
+export async function resolvePlayback(videoId: string): Promise<PlaybackSource> {
+  if (!/^[0-9a-f-]{36}$/i.test(videoId)) throw new Error("A valid video ID is required.");
   const { data, error } = await supabase.functions.invoke("resolve-playback", { body: { videoId } });
   if (error) throw error;
   if (!data?.signedUrl || typeof data.signedUrl !== "string") {
     throw new Error(data?.error || "Video playback could not be authorized.");
   }
-  return data.signedUrl;
+  return {
+    url: data.signedUrl,
+    type: data.playbackType === "hls" ? "hls" : "file",
+    expiresIn: typeof data.expiresIn === "number" ? data.expiresIn : undefined,
+  };
 }
 export async function hydrateVideos(rows: VideoRow[]): Promise<VideoRow[]> {
   if (!rows.length) return [];
