@@ -15,7 +15,8 @@ type Profile = { id: string; username: string | null; display_name: string; avat
 type VideoRow = {
   id: string; creator_id: string; title: string; description: string; video_path: string;
   thumbnail_path: string | null; duration_seconds: number | null; visibility: string; kind: "video" | "short";
-  status: string; category: string; views_count: number; published_at: string | null; created_at: string; allow_comments?: boolean;
+  status: string; media_status: string; playback_manifest_path: string | null;
+  category: string; views_count: number; published_at: string | null; created_at: string; allow_comments?: boolean;
   video_reactions?: { count: number }[]; comments?: { count: number }[]; creator?: Profile;
 };
 type PostRow = { id: string; creator_id: string; body: string; media_urls: string[]; visibility: string; created_at: string; creator?: Profile; likes?: number; likedByMe?: boolean };
@@ -920,7 +921,7 @@ function App() {
     }
     setStudioLoading(true);
     const { data, error } = await supabase.from("videos")
-      .select("id,creator_id,title,description,video_path,thumbnail_path,duration_seconds,visibility,kind,status,category,views_count,published_at,created_at,allow_comments")
+      .select("id,creator_id,title,description,video_path,thumbnail_path,duration_seconds,visibility,kind,status,media_status,playback_manifest_path,category,views_count,published_at,created_at,allow_comments")
       .eq("creator_id", user.id).order("created_at", { ascending: false }).limit(100);
     if (error) {
       notify("Could not load your uploads", error.message, "error");
@@ -1037,6 +1038,17 @@ function App() {
     setLibraryVideos((all) => all.filter((item) => item.id !== video.id));
     if (selectedVideo?.id === video.id) setSelectedVideo(null);
     notify("Video and media files deleted.", undefined, "success");
+  };
+
+  const retryMediaProcessing = async (video: VideoRow) => {
+    if (!user?.id || video.media_status !== "failed") return;
+    const { data, error } = await supabase.functions.invoke("retry-media-processing", { body: { videoId: video.id } });
+    if (error || !data?.success) {
+      notify("Media processing retry failed", error?.message || data?.error || "The server could not queue this retry.", "error");
+      return;
+    }
+    notify("Media processing queued", "OmniTube will rebuild the adaptive playback files from your existing upload.", "success");
+    await loadStudioVideos();
   };
 
   const signOut = async () => {
@@ -1216,7 +1228,8 @@ function App() {
           <div className="studio-library-panel"><div className="studio-library-heading"><div><p className="eyebrow">YOUR CONTENT</p><h3>Manage your uploads</h3></div><span>{myVideos.length} {myVideos.length === 1 ? "video" : "videos"}</span></div>
             {studioLoading ? <div className="studio-library-loading"><span className="spinner" /> Loading your library…</div> : myVideos.map((item) => <article className="studio-video-row" key={item.id}>
               <ThumbnailPreview path={item.thumbnail_path} />
-              <div className="studio-video-copy"><strong>{item.title}</strong><span>{item.status.toUpperCase()} · {item.visibility} · {item.kind === "short" ? "Short" : "Video"}</span><small>{formatCount(item.views_count)} views · {timeAgo(item.published_at || item.created_at)}</small></div>
+              <div className="studio-video-copy"><strong>{item.title}</strong><span>{item.status.toUpperCase()} · {item.media_status === "ready" ? "ADAPTIVE PLAYBACK READY" : item.media_status.toUpperCase()} · {item.visibility} · {item.kind === "short" ? "Short" : "Video"}</span><small>{formatCount(item.views_count)} views · {timeAgo(item.published_at || item.created_at)}</small></div>
+              {item.status === "published" && item.media_status === "failed" && <button className="btn btn-quiet studio-video-edit" onClick={() => void retryMediaProcessing(item)}><ArrowDownUp size={14} /> Retry media</button>}
               <button className="btn btn-quiet studio-video-edit" onClick={() => setEditingVideo(item)} disabled={item.status === "failed"}><Settings size={14} /> Edit</button>
               <button className="icon-btn studio-video-delete" onClick={() => void deleteVideo(item)} aria-label={"Delete " + item.title} title="Delete video"><X size={16} /></button>
             </article>)}
