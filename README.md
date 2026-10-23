@@ -7,7 +7,7 @@
 - **Web:** React 19, TypeScript strict mode, Vite, Lucide icons, responsive dark UI.
 - **Identity:** Supabase Auth magic links and persistent PKCE browser sessions.
 - **Data:** PostgreSQL tables with owner-aware row-level security; profiles are provisioned on signup; notification and view-count triggers live in the private database schema.
-- **Media:** Private Supabase Storage bucket for original video, public bucket for thumbnails/assets, TUS resumable uploads for large media, server-authorized short-lived playback URLs, and an authenticated publish function.
+- **Media:** Private Supabase Storage buckets for original video and per-video thumbnails, a public bucket for creator avatars/general assets, TUS resumable uploads for large media, RLS-authorized short-lived playback/thumbnail URLs, and an authenticated publish function.
 - **Live:** LiveKit browser SDK with server-minted, room-scoped tokens. Live media requires your own LiveKit endpoint and server credentials.
 - **Quality:** TypeScript typecheck and production build in GitHub Actions.
 
