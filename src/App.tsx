@@ -212,7 +212,7 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
       if (error) notify("Could not remove reaction", error.message, "error");
       else { setIsLiked(false); setLikes((n) => Math.max(0, n - 1)); }
     } else {
-      const { error } = await supabase.from("video_reactions").upsert({ video_id: video.id, user_id: userId, reaction: "like" });
+      const { error } = await supabase.from("video_reactions").insert({ video_id: video.id, user_id: userId, reaction: "like" });
       if (error) notify("Could not react", error.message, "error");
       else { setIsLiked(true); setLikes((n) => n + 1); }
     }
