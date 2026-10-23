@@ -90,15 +90,9 @@ Deno.serve(async (request: Request) => {
     return respond(403, { error: "Thumbnail path is invalid; deletion was stopped for safety" });
   }
 
-  // Hide first, then cancel any active transcode lease before enumerating HLS
-  // objects. The worker checks that its lease is still current before/after each
-  // upload so a concurrent delete cannot leave newly orphaned renditions.
-  const { error: hideError } = await admin.from("videos")
-    .update({ visibility: "private", updated_at: new Date().toISOString() })
-    .eq("id", video.id)
-    .eq("creator_id", auth.user.id);
-  if (hideError) return respond(503, { error: "Could not make the video private; no media was deleted" });
-
+  // Cancel the queue lease before locking the video row. The worker's atomic
+  // finalizer locks job -> video, so deletion must use the same lock order to
+  // avoid deadlocks. A worker already finishing is serialized before this step.
   const { error: cancelError } = await admin.from("media_processing_jobs").update({
     status: "failed",
     locked_at: null,
@@ -108,10 +102,16 @@ Deno.serve(async (request: Request) => {
   }).eq("video_id", video.id).in("status", ["pending", "processing"]);
   if (cancelError) {
     return respond(503, {
-      error: "The video is private, but the transcode job could not be cancelled. Retry deletion after checking worker status.",
+      error: "The video is still available, but its transcode job could not be cancelled. Retry deletion after checking worker status.",
       retryable: true,
     });
   }
+
+  const { error: hideError } = await admin.from("videos")
+    .update({ visibility: "private", updated_at: new Date().toISOString() })
+    .eq("id", video.id)
+    .eq("creator_id", auth.user.id);
+  if (hideError) return respond(503, { error: "The transcode was cancelled, but the video could not be made private. Retry deletion safely." });
 
   try {
     const renditionObjects = await listBucketObjects(admin, "omnitube-renditions", renditionRoot);
