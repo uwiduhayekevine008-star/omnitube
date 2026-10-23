@@ -181,7 +181,19 @@ begin
   from public.videos v
   where v.id = v_job.video_id
   for update;
-  if not found or v_video.status <> 'published' or v_video.media_status <> 'processing' then
+
+  if not found then
+    update public.media_processing_jobs j
+      set status = 'failed', locked_at = null, locked_by = null,
+          last_error = 'Video no longer exists; processing was cancelled.', updated_at = now()
+      where j.id = v_job.id and j.status = 'processing' and j.locked_by = p_worker_id;
+    return false;
+  end if;
+  if v_video.status <> 'published' or v_video.media_status <> 'processing' then
+    update public.media_processing_jobs j
+      set status = 'failed', locked_at = null, locked_by = null,
+          last_error = 'Video is no longer eligible for media processing.', updated_at = now()
+      where j.id = v_job.id and j.status = 'processing' and j.locked_by = p_worker_id;
     return false;
   end if;
 
