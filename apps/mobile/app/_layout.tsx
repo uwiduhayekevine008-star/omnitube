@@ -1,14 +1,24 @@
-import { Stack } from "expo-router";
+import { router, Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { AudioSession, registerGlobals } from "@livekit/react-native";
+import * as Notifications from "expo-notifications";
+import { routeForNotification, type OmniPushPayload } from "../src/lib/pushNotifications";
 import { AuthProvider } from "../src/lib/AuthContext";
 import { theme } from "../src/theme";
 registerGlobals();
 export default function RootLayout() {
   useEffect(() => {
     void AudioSession.startAudioSession();
-    return () => { void AudioSession.stopAudioSession(); };
+    const response = Notifications.addNotificationResponseReceivedListener((event) => {
+      const data = event.notification.request.content.data as OmniPushPayload;
+      const destination = routeForNotification(data);
+      if (destination) router.push(destination as never);
+    });
+    return () => {
+      response.remove();
+      void AudioSession.stopAudioSession();
+    };
   }, []);
   return <AuthProvider><StatusBar style="light" /><Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.bg }, animation: "fade_from_bottom" }}>
     <Stack.Screen name="(tabs)" />
