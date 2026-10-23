@@ -3,9 +3,10 @@
   "compilerOptions": {
     "strict": true,
     "noEmit": true,
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": [
+        "./src/*"
+      ]
     }
   },
   "include": [
@@ -15,5 +16,7 @@
     "expo-env.d.ts",
     "../../src/lib/database.types.ts"
   ],
-  "exclude": ["node_modules"]
+  "exclude": [
+    "node_modules"
+  ]
 }
