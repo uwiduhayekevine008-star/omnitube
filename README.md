@@ -32,7 +32,7 @@ supabase/
 
 ## Native mobile app (Expo)
 
-A React Native / Expo SDK 57 app now lives at [`apps/mobile`](apps/mobile/README.md). It has native Discover, vertical Shorts, Community, Creator Studio, Live, creator profile, notifications, video playback, comments, and secure resumable uploads.
+A React Native / Expo SDK 58 app now lives at [`apps/mobile`](apps/mobile/README.md). It includes native Discover with personalized ranking and Following feed, vertical swipe Shorts, Community posts, Creator Studio with resumable uploads, LiveKit rooms/chat, creator channels and analytics, secure video playback, comments/reactions/reposts, Watch later/history, reporting, realtime/push notifications, and device privacy/playback settings.
 
 To start the Expo project:
 
@@ -44,7 +44,7 @@ npm run typecheck
 npm run start
 ```
 
-LiveKit uses native WebRTC and requires a development client or store build rather than Expo Go. See the [mobile setup guide](apps/mobile/README.md) for Android/iOS builds, environment values, EAS setup, and provider requirements. GitHub Actions now typechecks and exports both web and mobile builds.
+LiveKit uses native WebRTC and requires a development client or store build rather than Expo Go. See the [mobile setup guide](apps/mobile/README.md) for Android/iOS builds, environment values, EAS setup, and provider requirements. GitHub Actions verifies TypeScript and production exports for the web and Expo Android bundle, checks Expo SDK package compatibility, and runs Expo Doctor.
 
 ## 1. Configure the app locally
 
