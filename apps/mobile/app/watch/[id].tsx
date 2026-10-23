@@ -91,7 +91,7 @@ export default function WatchScreen() {
     setLiked(!wasLiked); setLikeCount((old) => Math.max(0, old + (wasLiked ? -1 : 1)));
     const result = wasLiked
       ? await supabase.from("video_reactions").delete().eq("video_id", video.id).eq("user_id", user.id)
-      : await supabase.from("video_reactions").upsert({ video_id: video.id, user_id: user.id, reaction: "like" });
+      : await supabase.from("video_reactions").insert({ video_id: video.id, user_id: user.id, reaction: "like" });
     if (result.error) { setLiked(wasLiked); setLikeCount((old) => Math.max(0, old + (wasLiked ? 1 : -1))); Alert.alert("Like was not saved", result.error.message); }
   };
 
