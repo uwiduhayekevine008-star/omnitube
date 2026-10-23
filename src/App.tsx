@@ -577,6 +577,32 @@ function App() {
     return () => { active = false; };
   }, [user?.id, user, notify]);
 
+  useEffect(() => {
+    if (!user?.id) { setNotifications([]); return; }
+    let active = true;
+    void (async () => {
+      const { data, error } = await supabase.from("notifications")
+        .select("id,kind,body,entity_type,entity_id,read_at,created_at,recipient_id")
+        .eq("recipient_id", user.id).order("created_at", { ascending: false }).limit(80);
+      if (!active) return;
+      if (error) { notify("Could not load notifications", error.message, "error"); return; }
+      setNotifications((previous) => {
+        const byId = new Map();
+        for (const item of [...(data || []), ...previous]) byId.set(item.id, item);
+        return Array.from(byId.values())
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+          .slice(0, 80);
+      });
+    })();
+    const channel = supabase.channel("omnitube-notifications-" + user.id)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "notifications", filter: "recipient_id=eq." + user.id }, (event) => {
+        const incoming = event.new as any;
+        setNotifications((previous) => [incoming, ...previous.filter((item) => item.id !== incoming.id)].slice(0, 80));
+        notify("New activity", incoming.body || "You have a new notification.", "info");
+      }).subscribe();
+    return () => { active = false; void supabase.removeChannel(channel); };
+  }, [user?.id, notify]);
+
   const loadVideos = useCallback(async () => {
     if (!isSupabaseConfigured) { setLoading(false); return; }
     setLoading(true);
