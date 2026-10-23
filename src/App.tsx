@@ -187,11 +187,12 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
   const saveWatch = useCallback(async (seconds: number) => {
     if (!userId || seconds < 1 || seconds - lastSaved.current < 10) return;
     lastSaved.current = seconds;
-    const today = new Date().toISOString().slice(0, 10);
-    await supabase.from("video_views").upsert({
-      video_id: video.id, viewer_id: userId, view_date: today, watch_seconds: seconds,
-      source: video.kind === "short" ? "shorts" : "feed"
-    }, { onConflict: "video_id,viewer_id,view_date" });
+    const { error } = await supabase.rpc("record_video_watch", {
+      p_video_id: video.id,
+      p_watch_seconds: seconds,
+      p_source: video.kind === "short" ? "shorts" : "feed"
+    });
+    if (error) notify("Watch progress was not saved", error.message, "error");
   }, [userId, video.id, video.kind]);
   const addComment = async (event: FormEvent) => {
     event.preventDefault();
