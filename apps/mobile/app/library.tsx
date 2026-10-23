@@ -70,7 +70,7 @@ export default function LibraryScreen(){
         <SectionTitle title="Playlists" detail="Private, public and unlisted collections." action={<Text style={styles.playlistNumber}>{playlists.length}</Text>}/>
         {loading?<ActivityIndicator color={theme.mint} style={{marginVertical:22}}/>:null}
       </View>}
-      ListEmptyComponent={!loading?<EmptyState icon="albums-outline" title="Your library, your rules." detail="Create playlists for tutorials, inspiration, favorites, research or any collection you want to keep." action={<ActionButton title="Create your first playlist" icon="add-circle-outline" onPress={()=>setShowCreate(true)}/>}/>:null}
+      ListEmptyComponent={!loading?<EmptyState icon="albums-outline" title="Your library, your rules." detail="Create playlists for tutorials, inspiration, favorites, research or any collection you want to keep." action={<ActionButton title="Create your first playlist" icon="add-circle-outline" onPress={()=>setShowCreate(true)}/>}/>:undefined}
       ListFooterComponent={<View style={{height:25}}/>}
     />
   </AppScreen>;
