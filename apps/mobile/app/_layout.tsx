@@ -18,5 +18,8 @@ export default function RootLayout() {
     <Stack.Screen name="live/[id]" options={{ presentation: "fullScreenModal", animation: "slide_from_bottom", gestureEnabled: false }} />
     <Stack.Screen name="auth/callback" options={{ presentation: "modal" }} />
     <Stack.Screen name="notifications" options={{ animation: "slide_from_right" }} />
+    <Stack.Screen name="history" options={{ animation: "slide_from_right" }} />
+    <Stack.Screen name="library" options={{ animation: "slide_from_right" }} />
+    <Stack.Screen name="library/[id]" options={{ animation: "slide_from_right" }} />
   </Stack></AuthProvider>;
 }
