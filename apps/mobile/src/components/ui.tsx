@@ -7,6 +7,32 @@ import { initials } from "../lib/media";
 import type { Profile } from "../lib/types";
 import { Image } from "expo-image";
 
+const styles = StyleSheet.create({
+  screen: { flex: 1, backgroundColor: theme.bg },
+  brand: { flexDirection: "row", alignItems: "center", gap: 9 },
+  brandMark: { width: 31, height: 31, borderRadius: 10, backgroundColor: theme.mint, justifyContent: "center", alignItems: "center" },
+  brandText: { fontSize: 21, fontWeight: "900", letterSpacing: -1, color: theme.text },
+  brandAccent: { color: theme.mint },
+  avatar: { overflow: "hidden", borderWidth: 1, borderColor: theme.line, backgroundColor: theme.panel3, justifyContent: "center", alignItems: "center" },
+  avatarInitials: { fontWeight: "800", color: theme.mint },
+  button: { minHeight: 43, borderRadius: 13, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1 },
+  button_primary: { backgroundColor: theme.mint, borderColor: theme.mint },
+  button_secondary: { backgroundColor: theme.panel2, borderColor: theme.line },
+  button_quiet: { backgroundColor: "transparent", borderColor: theme.line },
+  button_danger: { backgroundColor: "#FF8A9D12", borderColor: "#FF8A9D45" },
+  buttonPressed: { opacity: 0.84, transform: [{ scale: 0.985 }] },
+  buttonText: { color: theme.text, fontWeight: "800", fontSize: 12 },
+  buttonTextPrimary: { color: "#071712" },
+  eyebrow: { color: theme.mint, fontSize: 9, fontWeight: "900", letterSpacing: 1.7, textTransform: "uppercase" },
+  empty: { alignItems: "center", justifyContent: "center", paddingHorizontal: 27, paddingVertical: 42, minHeight: 260 },
+  emptyIcon: { width: 54, height: 54, borderRadius: 17, backgroundColor: "#A99AFF14", borderWidth: 1, borderColor: "#A99AFF32", alignItems: "center", justifyContent: "center" },
+  emptyTitle: { color: theme.text, fontSize: 17, fontWeight: "800", marginTop: 17, textAlign: "center" },
+  emptyDetail: { color: theme.muted, fontSize: 12, lineHeight: 19, marginTop: 8, textAlign: "center", maxWidth: 330 },
+  surface: { borderWidth: 1, borderColor: theme.line, backgroundColor: theme.panel, borderRadius: 17, padding: 15 },
+  sectionTitle: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 24, marginBottom: 13 },
+  sectionTitleText: { color: theme.text, fontSize: 17, fontWeight: "800" },
+  sectionDetail: { marginTop: 4, color: theme.muted, fontSize: 11, lineHeight: 17 },
+});
 export function AppScreen({ children, scroll = false, style }: { children: ReactNode; scroll?: boolean; style?: ViewStyle }) {
   const insets = useSafeAreaInsets();
   return <View style={[styles.screen, { paddingTop: Math.max(insets.top, 10) }, style]}>{children}</View>;
@@ -66,30 +92,4 @@ export const ui = StyleSheet.create({
   multiline: { minHeight: 100, paddingTop: 13, textAlignVertical: "top" },
   pill: { borderRadius: 99, paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: theme.line, backgroundColor: theme.panel2 },
   pillText: { color: theme.muted, fontSize: 11, fontWeight: "700" },
-});
-const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: theme.bg },
-  brand: { flexDirection: "row", alignItems: "center", gap: 9 },
-  brandMark: { width: 31, height: 31, borderRadius: 10, backgroundColor: theme.mint, justifyContent: "center", alignItems: "center" },
-  brandText: { fontSize: 21, fontWeight: "900", letterSpacing: -1, color: theme.text },
-  brandAccent: { color: theme.mint },
-  avatar: { overflow: "hidden", borderWidth: 1, borderColor: theme.line, backgroundColor: theme.panel3, justifyContent: "center", alignItems: "center" },
-  avatarInitials: { fontWeight: "800", color: theme.mint },
-  button: { minHeight: 43, borderRadius: 13, paddingHorizontal: 14, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, borderWidth: 1 },
-  button_primary: { backgroundColor: theme.mint, borderColor: theme.mint },
-  button_secondary: { backgroundColor: theme.panel2, borderColor: theme.line },
-  button_quiet: { backgroundColor: "transparent", borderColor: theme.line },
-  button_danger: { backgroundColor: "#FF8A9D12", borderColor: "#FF8A9D45" },
-  buttonPressed: { opacity: 0.84, transform: [{ scale: 0.985 }] },
-  buttonText: { color: theme.text, fontWeight: "800", fontSize: 12 },
-  buttonTextPrimary: { color: "#071712" },
-  eyebrow: { color: theme.mint, fontSize: 9, fontWeight: "900", letterSpacing: 1.7, textTransform: "uppercase" },
-  empty: { alignItems: "center", justifyContent: "center", paddingHorizontal: 27, paddingVertical: 42, minHeight: 260 },
-  emptyIcon: { width: 54, height: 54, borderRadius: 17, backgroundColor: "#A99AFF14", borderWidth: 1, borderColor: "#A99AFF32", alignItems: "center", justifyContent: "center" },
-  emptyTitle: { color: theme.text, fontSize: 17, fontWeight: "800", marginTop: 17, textAlign: "center" },
-  emptyDetail: { color: theme.muted, fontSize: 12, lineHeight: 19, marginTop: 8, textAlign: "center", maxWidth: 330 },
-  surface: { borderWidth: 1, borderColor: theme.line, backgroundColor: theme.panel, borderRadius: 17, padding: 15 },
-  sectionTitle: { flexDirection: "row", alignItems: "center", gap: 12, marginTop: 24, marginBottom: 13 },
-  sectionTitleText: { color: theme.text, fontSize: 17, fontWeight: "800" },
-  sectionDetail: { marginTop: 4, color: theme.muted, fontSize: 11, lineHeight: 17 },
 });
