@@ -17,7 +17,8 @@ type VideoRow = {
   status: string; category: string; views_count: number; published_at: string | null; created_at: string; allow_comments?: boolean;
   video_reactions?: { count: number }[]; comments?: { count: number }[]; creator?: Profile;
 };
-type PostRow = { id: string; creator_id: string; body: string; media_urls: string[]; visibility: string; created_at: string; creator?: Profile; likes?: number };
+type PostRow = { id: string; creator_id: string; body: string; media_urls: string[]; visibility: string; created_at: string; creator?: Profile; likes?: number; likedByMe?: boolean };
+type PostCommentRow = { id: string; body: string; user_id: string; created_at: string; parent_comment_id: string | null; author?: Profile | null };
 type StreamRow = { id: string; creator_id: string; title: string; description: string; status: string; visibility: string; room_name: string; starts_at: string; creator?: Profile };
 type StreamMessage = { id: string; stream_id: string; user_id: string; body: string; created_at: string; author?: Profile | null };
 type Notice = { id: string; title: string; detail?: string; kind?: "success" | "error" | "info" };
@@ -534,8 +535,108 @@ function PostComposer({ userId, onCreated, notify }: { userId: string; onCreated
   return <form onSubmit={submit} className="post-composer"><textarea value={body} onChange={(event) => setBody(event.target.value)} maxLength={5000} rows={3} placeholder="What’s on your mind? Share a thought, an update, or a behind-the-scenes moment." /><div className="composer-bottom"><span>{body.length}/5000 · Public post</span><button className="btn btn-primary" type="submit" disabled={busy || !body.trim()}>{busy ? "Publishing…" : <><Send size={15} /> Publish post</>}</button></div></form>;
 }
 
-function CommunityCard({ post, onLike, onReport, userId }: { post: PostRow; onLike: () => void; onReport: () => void; userId: string | null }) {
-  return <article className="community-card"><div className="post-head"><Avatar profile={post.creator} /><div><strong>{post.creator?.display_name || "Creator"}</strong><small>{timeAgo(post.created_at)} · Community post</small></div><button className="icon-btn tiny" aria-label="Post actions"><MoreHorizontal size={20} /></button></div><p className="post-body">{post.body}</p>{post.media_urls?.length > 0 && <div className="post-media">{post.media_urls.map((url) => <img key={url} src={url} alt="Post attachment" loading="lazy" />)}</div>}<div className="post-actions"><button onClick={onLike} disabled={!userId} className="post-action"><Heart size={17} /> Like <span>{formatCount(post.likes || 0)}</span></button><span className="post-action passive"><MessageCircle size={17} /> Conversation</span><button className="post-action" onClick={onReport}><ShieldAlert size={15} /> Report</button><button className="post-action" onClick={() => navigator.clipboard?.writeText(window.location.origin + "/community/" + post.id)}><Send size={16} /> Share</button></div></article>;
+function CommunityCard({ post, onLike, onReport, onDiscuss, userId }: { post: PostRow; onLike: () => void; onReport: () => void; onDiscuss: () => void; userId: string | null }) {
+  return <article className="community-card">
+    <div className="post-head"><Avatar profile={post.creator} /><div><strong>{post.creator?.display_name || "Creator"}</strong><small>{timeAgo(post.created_at)} · Community post</small></div><button className="icon-btn tiny" aria-label="Open conversation" title="Open conversation" onClick={onDiscuss}><MessageCircle size={18} /></button></div>
+    <p className="post-body">{post.body}</p>
+    {post.media_urls?.length > 0 && <div className="post-media">{post.media_urls.map((url) => <img key={url} src={url} alt="Post attachment" loading="lazy" />)}</div>}
+    <div className="post-actions">
+      <button onClick={onLike} disabled={!userId} className={"post-action " + (post.likedByMe ? "liked" : "")} aria-pressed={Boolean(post.likedByMe)}><Heart size={17} fill={post.likedByMe ? "currentColor" : "none"} /> {post.likedByMe ? "Liked" : "Like"} <span>{formatCount(post.likes || 0)}</span></button>
+      <button className="post-action" onClick={onDiscuss}><MessageCircle size={17} /> Conversation</button>
+      <button className="post-action" onClick={onReport}><ShieldAlert size={15} /> Report</button>
+      <button className="post-action" onClick={() => { void navigator.clipboard?.writeText(window.location.origin + "/community/" + post.id); }}><Send size={16} /> Share</button>
+    </div>
+  </article>;
+}
+
+function PostDiscussionDialog({ post, userId, profile, onClose, onRequireAuth, notify }: {
+  post: PostRow;
+  userId: string | null;
+  profile: Profile | null;
+  onClose: () => void;
+  onRequireAuth: () => void;
+  notify: (title: string, detail?: string, kind?: Notice["kind"]) => void;
+}) {
+  const [comments, setComments] = useState<PostCommentRow[]>([]);
+  const [body, setBody] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      const { data, error } = await supabase.from("comments")
+        .select("id,body,user_id,created_at,parent_comment_id")
+        .eq("post_id", post.id).order("created_at", { ascending: false }).limit(100);
+      if (!active) return;
+      if (error) {
+        setLoading(false);
+        notify("Could not load this conversation", error.message, "error");
+        return;
+      }
+      const rows = (data || []) as PostCommentRow[];
+      const ids = Array.from(new Set(rows.map((item) => item.user_id)));
+      const authors = ids.length
+        ? await supabase.from("profiles").select("id,username,display_name,avatar_url,bio,is_verified").in("id", ids)
+        : { data: [] as any[] };
+      if (!active) return;
+      const profileMap = new Map((authors.data || []).map((person: any) => [person.id, person]));
+      setComments(rows.map((item) => ({ ...item, author: profileMap.get(item.user_id) || null })));
+      setLoading(false);
+    })();
+    return () => { active = false; };
+  }, [post.id, notify]);
+
+  const submitComment = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!userId) { onRequireAuth(); return; }
+    const cleaned = body.trim();
+    if (!cleaned || busy) return;
+    setBusy(true);
+    const { data, error } = await supabase.from("comments")
+      .insert({ post_id: post.id, user_id: userId, body: cleaned })
+      .select("id,body,user_id,created_at,parent_comment_id").single();
+    setBusy(false);
+    if (error || !data) {
+      notify("Comment was not posted", error?.message || "The comment was not saved.", "error");
+      return;
+    }
+    setComments((current) => [{ ...(data as PostCommentRow), author: profile }, ...current]);
+    setBody("");
+    notify("Comment posted.", undefined, "success");
+  };
+
+  const deleteComment = async (comment: PostCommentRow) => {
+    if (!userId || comment.user_id !== userId || !window.confirm("Delete your comment? This cannot be undone.")) return;
+    const { error } = await supabase.from("comments").delete().eq("id", comment.id).eq("user_id", userId);
+    if (error) notify("Comment was not deleted", error.message, "error");
+    else {
+      setComments((current) => current.filter((item) => item.id !== comment.id));
+      notify("Comment deleted.", undefined, "success");
+    }
+  };
+
+  return <Modal onClose={onClose} className="post-discussion-modal">
+    <div className="modal-heading">
+      <div><p className="eyebrow">CREATOR COMMUNITY</p><h2>Conversation</h2><p className="muted">Join the discussion around this post.</p></div>
+      <button className="icon-btn" onClick={onClose} aria-label="Close conversation"><X /></button>
+    </div>
+    <article className="discussion-post-preview">
+      <div className="post-head"><Avatar profile={post.creator} /><div><strong>{post.creator?.display_name || "Creator"}</strong><small>{timeAgo(post.created_at)}</small></div></div>
+      <p className="post-body">{post.body}</p>
+      {post.media_urls?.length > 0 && <div className="post-media">{post.media_urls.map((url) => <img key={url} src={url} alt="Post attachment" loading="lazy" />)}</div>}
+    </article>
+    <div className="discussion-comments-heading"><strong>Replies</strong><span>{comments.length}{comments.length === 100 ? "+" : ""}</span></div>
+    <div className="comment-list discussion-comment-list">
+      {loading ? <div className="comments-empty"><span className="spinner" /><p>Loading conversation…</p></div> :
+        comments.length ? comments.map((comment) => <div className="comment" key={comment.id} style={comment.parent_comment_id ? { marginLeft: 19 } : undefined}>
+          <Avatar profile={comment.author} size="sm" />
+          <div><div className="comment-byline"><strong>{comment.author?.display_name || "Creator"}</strong><span>{timeAgo(comment.created_at)}</span></div><p>{comment.body}</p>{userId === comment.user_id && <button className="post-comment-delete" onClick={() => void deleteComment(comment)}>Delete</button>}</div>
+        </div>) : <div className="comments-empty"><MessageCircle size={22} /><p>No replies yet. Start a thoughtful conversation.</p></div>}
+    </div>
+    {userId ? <form className="comment-form discussion-composer" onSubmit={(event) => void submitComment(event)}><Avatar profile={profile} size="sm" /><input value={body} onChange={(event) => setBody(event.target.value)} maxLength={3000} placeholder="Add a thoughtful comment…" aria-label="Write a comment" /><button type="submit" className="icon-btn" disabled={busy || !body.trim()} aria-label="Post comment">{busy ? <span className="spinner" /> : <Send size={17} />}</button></form> :
+      <div className="discussion-sign-in"><span>Sign in to join the conversation.</span><button className="btn btn-primary" onClick={onRequireAuth}>Sign in</button></div>}
+  </Modal>;
 }
 
 function App() {
@@ -544,6 +645,7 @@ function App() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [videos, setVideos] = useState<VideoRow[]>([]);
   const [posts, setPosts] = useState<PostRow[]>([]);
+  const [discussionPost, setDiscussionPost] = useState<PostRow | null>(null);
   const [streams, setStreams] = useState<StreamRow[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
   const [query, setQuery] = useState("");
@@ -777,13 +879,27 @@ function App() {
     const ids = Array.from(new Set(rows.map((row) => row.creator_id)));
     const [prof, reactions] = await Promise.all([
       ids.length ? supabase.from("profiles").select("id,username,display_name,avatar_url,bio,is_verified").in("id", ids) : Promise.resolve({ data: [] as any[] }),
-      supabase.from("post_reactions").select("post_id")
+      ids.length ? supabase.from("post_reactions").select("post_id,user_id").in("post_id", ids) : Promise.resolve({ data: [] as any[] })
     ]);
     const profileMap = new Map((prof.data || []).map((person: any) => [person.id, person]));
     const counts = new Map<string, number>();
-    (reactions.data || []).forEach((reaction: any) => counts.set(reaction.post_id, (counts.get(reaction.post_id) || 0) + 1));
-    setPosts(rows.map((row) => ({ ...row, creator: profileMap.get(row.creator_id), likes: counts.get(row.id) || 0 })));
-  }, [section, notify, routePostId]);
+    const likedByUser = new Set<string>();
+    (reactions.data || []).forEach((reaction: any) => {
+      counts.set(reaction.post_id, (counts.get(reaction.post_id) || 0) + 1);
+      if (user?.id && reaction.user_id === user.id) likedByUser.add(reaction.post_id);
+    });
+    const hydratedPosts = rows.map((row) => ({
+      ...row,
+      creator: profileMap.get(row.creator_id),
+      likes: counts.get(row.id) || 0,
+      likedByMe: likedByUser.has(row.id)
+    }));
+    setPosts(hydratedPosts);
+    if (routePostId) {
+      const targetPost = hydratedPosts.find((row) => row.id === routePostId);
+      if (targetPost) setDiscussionPost(targetPost);
+    }
+  }, [section, notify, routePostId, user?.id]);
 
   const loadStreams = useCallback(async () => {
     if (section !== "live") return;
@@ -958,9 +1074,21 @@ function App() {
 
   const createPostReaction = async (post: PostRow) => {
     if (!user?.id) { setAuthOpen(true); return; }
-    const { error } = await supabase.from("post_reactions").upsert({ post_id: post.id, user_id: user.id, reaction: "like" }, { onConflict: "post_id,user_id" });
-    if (error) notify("Could not react to post", error.message, "error");
-    else { setPosts((all) => all.map((item) => item.id === post.id ? { ...item, likes: Number(item.likes || 0) + 1 } : item)); notify("Post liked.", undefined, "success"); }
+    const { data: existing, error: lookupError } = await supabase.from("post_reactions")
+      .select("reaction").eq("post_id", post.id).eq("user_id", user.id).maybeSingle();
+    if (lookupError) { notify("Could not check your reaction", lookupError.message, "error"); return; }
+    const result = existing
+      ? await supabase.from("post_reactions").delete().eq("post_id", post.id).eq("user_id", user.id)
+      : await supabase.from("post_reactions").insert({ post_id: post.id, user_id: user.id, reaction: "like" });
+    if (result.error) notify("Could not react to post", result.error.message, "error");
+    else {
+      setPosts((all) => all.map((item) => item.id === post.id ? {
+        ...item,
+        likes: Math.max(0, Number(item.likes || 0) + (existing ? -1 : 1)),
+        likedByMe: !existing
+      } : item));
+      notify(existing ? "Like removed." : "Post liked.", undefined, "success");
+    }
   };
 
   const markNotificationRead = async (id: string) => {
@@ -1032,7 +1160,7 @@ function App() {
         {section === "posts" && user && <PostComposer userId={user.id} notify={notify} onCreated={() => void loadPosts()} />}
         {section === "posts" && !user && <div className="join-community"><div className="join-community-icon"><MessageCircle size={20} /></div><div><strong>Join the conversation.</strong><p>Sign in to share a post or react to creators.</p></div><button className="btn btn-primary" onClick={() => setAuthOpen(true)}>Sign in</button></div>}
 
-        {section === "posts" && <div className="community-feed">{posts.map((post) => <CommunityCard key={post.id} post={post} userId={user?.id || null} onLike={() => void createPostReaction(post)} onReport={() => requestReport("post", post.id)} />)}{posts.length === 0 && <EmptyState icon={MessageCircle} title="Your community starts here." detail="No public posts are available yet. Create the first update and give people something to talk about." action={user ? <button className="btn btn-primary" onClick={() => document.querySelector<HTMLTextAreaElement>(".post-composer textarea")?.focus()}><Plus size={15} /> Write a post</button> : undefined} />}</div>}
+        {section === "posts" && <div className="community-feed">{posts.map((post) => <CommunityCard key={post.id} post={post} userId={user?.id || null} onLike={() => void createPostReaction(post)} onReport={() => requestReport("post", post.id)} onDiscuss={() => setDiscussionPost(post)} />)}{posts.length === 0 && <EmptyState icon={MessageCircle} title="Your community starts here." detail="No public posts are available yet. Create the first update and give people something to talk about." action={user ? <button className="btn btn-primary" onClick={() => document.querySelector<HTMLTextAreaElement>(".post-composer textarea")?.focus()}><Plus size={15} /> Write a post</button> : undefined} />}</div>}
 
         {section === "live" && <><div className="live-hero"><div className="live-hero-copy"><span className="live-pill"><span className="live-dot" /> LIVE EXPERIENCE</span><h3>Meet them <span>in real time.</span></h3><p>Live video and realtime chat, powered by an authenticated low-latency room.</p></div><button className="btn btn-primary" onClick={() => { if (!user) setAuthOpen(true); else setLiveSetup(true); }}><Radio size={16} /> Go live</button></div>
           <div className="live-list-heading"><h3>Live & scheduled</h3><span>{streams.filter((item) => item.status === "live").length} live</span></div>
@@ -1055,6 +1183,7 @@ function App() {
     {sidebarOpen && <button className="mobile-scrim" onClick={() => setSidebarOpen(false)} aria-label="Close navigation" />}
     {authOpen && <AuthDialog onClose={() => setAuthOpen(false)} notify={notify} />}
     {reportTarget && user?.id && <ReportDialog targetType={reportTarget.type} targetId={reportTarget.id} userId={user.id} onClose={() => setReportTarget(null)} notify={notify} />}
+    {discussionPost && <PostDiscussionDialog post={discussionPost} userId={user?.id || null} profile={profile} onClose={() => setDiscussionPost(null)} onRequireAuth={() => { setDiscussionPost(null); setAuthOpen(true); }} notify={notify} />}
     {editingVideo && user?.id && <EditVideoDialog video={editingVideo} userId={user.id} onClose={() => setEditingVideo(null)} onUpdated={() => { void loadStudioVideos(); void loadVideos(); }} notify={notify} />}
     {uploadOpen && user?.id && <UploadDialog userId={user.id} notify={notify} onClose={() => setUploadOpen(false)} onPublished={() => { void loadVideos(); if (section === "studio") void loadStudioVideos(); }} />}
     {selectedVideo && <VideoPlayer key={selectedVideo.id} video={selectedVideo} profile={profile} onClose={closeVideo} notify={notify} userId={user?.id || null} />}
