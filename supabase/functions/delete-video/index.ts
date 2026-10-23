@@ -1,4 +1,4 @@
-import { createClient } from "npm:@supabase/supabase-js@2.118.0";
+import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2.118.0";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -10,7 +10,7 @@ const corsHeaders = {
 const respond = (status: number, payload: Record<string, unknown>) =>
   new Response(JSON.stringify(payload), { status, headers: corsHeaders });
 
-async function listBucketObjects(admin: ReturnType<typeof createClient>, bucket: string, root: string): Promise<string[]> {
+async function listBucketObjects(admin: SupabaseClient<any>, bucket: string, root: string): Promise<string[]> {
   const pending = [root];
   const found: string[] = [];
   while (pending.length) {
@@ -37,7 +37,7 @@ async function listBucketObjects(admin: ReturnType<typeof createClient>, bucket:
   return found;
 }
 
-async function removeObjects(admin: ReturnType<typeof createClient>, bucket: string, paths: string[]) {
+async function removeObjects(admin: SupabaseClient<any>, bucket: string, paths: string[]) {
   for (let offset = 0; offset < paths.length; offset += 100) {
     const { error } = await admin.storage.from(bucket).remove(paths.slice(offset, offset + 100));
     if (error) throw new Error("One or more media objects could not be removed");
