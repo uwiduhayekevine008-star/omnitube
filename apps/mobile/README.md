@@ -55,7 +55,7 @@ npm run start
 
 ## Build packages
 
-Set up an Expo account and link the app before the first EAS build. Replace the setup marker in `app.json` with a valid EAS project ID after running `eas init`.
+Set up an Expo account and link the app before the first EAS build. Run `eas init` once to link this app to an EAS project; the CLI will write the valid project ID into `app.json`.
 
 ```bash
 npx eas-cli login
