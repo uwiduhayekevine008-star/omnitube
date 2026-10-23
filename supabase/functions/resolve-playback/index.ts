@@ -16,6 +16,7 @@ type PlaybackTicket = {
   v: 1;
   videoId: string;
   viewerId: string | null;
+  visibility: "public" | "unlisted" | "private";
   assetPath: string;
   exp: number;
 };
@@ -49,6 +50,7 @@ async function verifyTicket(token: string, secret: string): Promise<PlaybackTick
     const ticket = JSON.parse(new TextDecoder().decode(base64UrlDecode(payload))) as PlaybackTicket;
     if (ticket.v !== 1 || typeof ticket.videoId !== "string" ||
         !(ticket.viewerId === null || typeof ticket.viewerId === "string") ||
+        !["public", "unlisted", "private"].includes(ticket.visibility) ||
         typeof ticket.assetPath !== "string" || !Number.isInteger(ticket.exp) ||
         ticket.exp <= Math.floor(Date.now() / 1000)) return null;
     return ticket;
@@ -85,6 +87,9 @@ Deno.serve(async (request: Request) => {
       return textResponse(404, "Media manifest is unavailable");
     }
     const discoverable = ["public", "unlisted"].includes(video.visibility);
+    // A visibility change invalidates the entire ticket family, including child
+    // playlists and segments minted before the video was made private.
+    if (ticket.visibility !== video.visibility) return textResponse(404, "Media manifest is unavailable");
     if (!discoverable && ticket.viewerId !== video.creator_id) return textResponse(404, "Media manifest is unavailable");
 
     const manifestPath = video.playback_manifest_path;
@@ -140,8 +145,8 @@ Deno.serve(async (request: Request) => {
       // function re-checks the video's current visibility on each request.
       const assetTtl = 7 * 60 * 60;
       const assetTicket = await signTicket({
-        v: 1, videoId: video.id, viewerId: ticket.viewerId, assetPath: referencedPath,
-        exp: Math.floor(Date.now() / 1000) + assetTtl,
+        v: 1, videoId: video.id, viewerId: ticket.viewerId, visibility: ticket.visibility,
+        assetPath: referencedPath, exp: Math.floor(Date.now() / 1000) + assetTtl,
       }, privilegedKey);
       rewritten.push(supabaseUrl + "/functions/v1/resolve-playback?ticket=" + encodeURIComponent(assetTicket));
     }
@@ -179,6 +184,7 @@ Deno.serve(async (request: Request) => {
       v: 1,
       videoId: video.id,
       viewerId,
+      visibility: video.visibility as PlaybackTicket["visibility"],
       assetPath: video.playback_manifest_path,
       exp: expiresAt,
     }, privilegedKey);
