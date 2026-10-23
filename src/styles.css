@@ -619,3 +619,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .studio-video-copy strong { font-size: 9px; }
   .studio-video-copy span, .studio-video-copy small { font-size: 7px; }
 }
+
+.sign-out-button { border-color: var(--border); background: #121520; color: #8f97ac; }
+.sign-out-button:hover { color: var(--coral); border-color: #ff8c9c30; background: #ff8c9c09; }
+@media (max-width: 600px) { .sign-out-button { width: 31px; height: 31px; } }
