@@ -14,10 +14,11 @@ type NotificationRow = {
   read_at: string | null; created_at: string;
 };
 
-const iconFor = (kind: string): keyof typeof Ionicons.glyphMap => ({
+const notificationIcons: Record<string, keyof typeof Ionicons.glyphMap> = {
   follow: "person-add-outline", reaction: "heart-outline", comment: "chatbubble-ellipses-outline",
   repost: "repeat-outline", live: "radio-outline", mention: "at-outline", system: "sparkles-outline",
-}[kind] || "notifications-outline");
+};
+const iconFor = (kind: string): keyof typeof Ionicons.glyphMap => notificationIcons[kind] || "notifications-outline";
 
 export default function NotificationsScreen() {
   const { user } = useAuth();
