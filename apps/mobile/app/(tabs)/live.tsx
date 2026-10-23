@@ -53,7 +53,7 @@ export default function LiveScreen() {
       return;
     }
     setShowSetup(false); setTitle(""); setDescription("");
-    router.push({ pathname: "/live/[id]", params: { id, token: data.token as string, role: "publisher" } });
+    router.push({ pathname: "/live/[id]", params: { id, role: "publisher" } });
   };
 
   return <AppScreen style={{ paddingTop: 0 }}>
