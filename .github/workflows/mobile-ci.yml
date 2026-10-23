@@ -1,0 +1,44 @@
+name: Mobile Expo verification
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "apps/mobile/**"
+      - "src/lib/database.types.ts"
+      - ".github/workflows/mobile-ci.yml"
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - "apps/mobile/**"
+      - "src/lib/database.types.ts"
+      - ".github/workflows/mobile-ci.yml"
+permissions:
+  contents: read
+jobs:
+  verify-expo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: apps/mobile
+    env:
+      EXPO_PUBLIC_SUPABASE_URL: https://mrrndahmjfwiugjnjthi.supabase.co
+      EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ vars.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+      EXPO_PUBLIC_LIVEKIT_URL: wss://example.invalid
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.13"
+          cache: npm
+          cache-dependency-path: apps/mobile/package.json
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Check Expo SDK package compatibility
+        run: npx expo install --check
+      - name: TypeScript
+        run: npm run typecheck
+      - name: Verify Android bundle
+        run: npx expo export --platform android
+      - name: Expo doctor
+        run: npx expo-doctor
