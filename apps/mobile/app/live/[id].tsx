@@ -95,7 +95,7 @@ function RoomStage({stream,userId,isHost,onFinish,onLeave}:{stream:LiveStreamRow
     void (async()=>{
       const {data,error}=await supabase.from("stream_messages").select("*").eq("stream_id",stream.id).order("created_at",{ascending:false}).limit(100);
       if(error||!data||!active)return;
-      const ordered=[...data].reverse() as StreamMessageRow[];
+      const ordered=data as StreamMessageRow[];
       const ids=Array.from(new Set(ordered.map(row=>row.user_id)));
       const {data:people}=ids.length?await supabase.from("profiles").select("*").in("id",ids):{data:[] as Profile[]};
       const map:Record<string,Profile>={};(people||[]).forEach(person=>{map[person.id]=person as Profile;});
@@ -106,7 +106,7 @@ function RoomStage({stream,userId,isHost,onFinish,onLeave}:{stream:LiveStreamRow
       const {data:person}=await supabase.from("profiles").select("*").eq("id",row.user_id).maybeSingle();
       if(!active)return;
       if(person)setProfiles(old=>({...old,[person.id]:person as Profile}));
-      setMessages(old=>old.some(item=>item.id===row.id)?old:[...old,row].slice(-100));
+      setMessages(old=>old.some(item=>item.id===row.id)?old:[row,...old].slice(0,100));
     }).subscribe();
     return ()=>{active=false;void supabase.removeChannel(channel);};
   },[stream.id]);
@@ -118,7 +118,7 @@ function RoomStage({stream,userId,isHost,onFinish,onLeave}:{stream:LiveStreamRow
     const {data,error}=await supabase.from("stream_messages").insert({stream_id:stream.id,user_id:userId,body:text}).select("*").single();
     setSending(false);
     if(error)Alert.alert("Message not sent",error.message);
-    else if(data){setMessages(old=>old.some(row=>row.id===data.id)?old:[...old,data as StreamMessageRow].slice(-100));setBody("");}
+    else if(data){setMessages(old=>old.some(row=>row.id===data.id)?old:[data as StreamMessageRow,...old].slice(0,100));setBody("");}
   };
 
   return <View style={styles.stage}>
