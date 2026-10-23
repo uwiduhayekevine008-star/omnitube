@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, Text, useWindowDimensions, View } from "react-native";
 import Svg, { Line, Rect, Text as SvgText } from "react-native-svg";
 import { router } from "expo-router";
-import { AppScreen, Avatar, Brand, EmptyState, Eyebrow, SectionTitle, Surface, ui } from "../src/components/ui";
+import { AppScreen, ActionButton, Avatar, Brand, EmptyState, Eyebrow, SectionTitle, Surface, ui } from "../src/components/ui";
 import { useAuth } from "../src/lib/AuthContext";
 import { formatCount, timeAgo } from "../src/lib/media";
 import { supabase } from "../src/lib/supabase";
