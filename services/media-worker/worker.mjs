@@ -323,6 +323,9 @@ async function processVideo(admin, job) {
       if (await generatePoster(sourcePath, posterLocal, source.duration)) {
         const posterBytes = await readFile(posterLocal);
         const candidate = `${video.creator_id}/${video.id}-generated.jpg`;
+        // Register cleanup before uploading so a concurrent delete can remove
+        // the poster even if the upload finishes after the deleter's first sweep.
+        job.generatedPosterPath = candidate;
         const { error: posterError } = await admin.storage.from(THUMBNAIL_BUCKET).upload(candidate, posterBytes, {
           contentType: "image/jpeg",
           cacheControl: "3600",
@@ -446,6 +449,10 @@ export async function runWorker() {
         if (error instanceof MediaJobCancelledError) {
           try {
             await cleanupRenditionPrefix(admin, job.renditionRoot);
+            if (job.generatedPosterPath) {
+              const { error: posterCleanupError } = await admin.storage.from(THUMBNAIL_BUCKET).remove([job.generatedPosterPath]);
+              if (posterCleanupError) throw new Error("Cancelled poster cleanup failed");
+            }
             log("info", "transcode_cancelled", { jobId: job.id, videoId: job.video_id, reason: error.message });
           } catch (cleanupError) {
             log("error", "cancelled_rendition_cleanup_failed", {
@@ -454,6 +461,10 @@ export async function runWorker() {
             });
           }
         } else {
+          if (job.generatedPosterPath) {
+            const { error: posterCleanupError } = await admin.storage.from(THUMBNAIL_BUCKET).remove([job.generatedPosterPath]);
+            if (posterCleanupError) log("warn", "orphan_poster_cleanup_failed", { jobId: job.id, videoId: job.video_id });
+          }
           await handleFailure(admin, job, error);
         }
       } finally {
