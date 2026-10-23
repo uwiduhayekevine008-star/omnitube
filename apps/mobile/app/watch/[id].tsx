@@ -315,7 +315,7 @@ export default function WatchScreen() {
           <Text style={styles.playerToolTitle}>PLAYBACK</Text>
           <Text style={styles.playerTime}>{formatPlayerTime(currentTime)} / {formatPlayerTime(durationSeconds || video.duration_seconds || 0)}</Text>
         </View>
-        <View style={styles.playerProgress}><View style={[styles.playerBuffered,{width: `${durationSeconds > 0 ? Math.min(100, bufferedPosition / durationSeconds * 100) : 0}%`]}/><View style={[styles.playerProgressFill,{width: `${durationSeconds > 0 ? Math.min(100, currentTime / durationSeconds * 100) : 0}%`]}/></View>
+        <View style={styles.playerProgress}><View style={[styles.playerBuffered, { width: `${durationSeconds > 0 ? Math.min(100, bufferedPosition / durationSeconds * 100) : 0}%` }]} /><View style={[styles.playerProgressFill, { width: `${durationSeconds > 0 ? Math.min(100, currentTime / durationSeconds * 100) : 0}%` }]} /></View>
         <View style={styles.playerControlRow}>
           <Pressable onPress={() => seekBy(-10)} style={styles.playerControlButton} accessibilityRole="button" accessibilityLabel="Back 10 seconds"><Ionicons name="play-back" size={15} color={theme.text}/><Text style={styles.playerControlLabel}>10s</Text></Pressable>
           <Pressable onPress={() => seekBy(10)} style={styles.playerControlButton} accessibilityRole="button" accessibilityLabel="Forward 10 seconds"><Ionicons name="play-forward" size={15} color={theme.text}/><Text style={styles.playerControlLabel}>10s</Text></Pressable>
