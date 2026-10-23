@@ -547,3 +547,26 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @media (prefers-reduced-motion: reduce) {
   *, *:before, *:after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* Realtime live-room chat */
+.live-chat-heading span { display: inline-grid; place-items: center; min-width: 20px; height: 19px; margin-left: auto; padding: 0 5px; border: 1px solid var(--border); border-radius: 6px; color: #a3abc0; background: #ffffff05; font-size: 9px; }
+.live-chat-messages { display: flex; flex: 1; flex-direction: column; gap: 2px; min-height: 0; overflow-y: auto; margin: 11px -3px 8px; padding: 0 3px 9px; }
+.live-chat-message { display: flex; align-items: flex-start; gap: 8px; padding: 8px 5px; border-radius: 8px; }
+.live-chat-message:hover { background: #ffffff05; }
+.live-chat-message > div { flex: 1; min-width: 0; }
+.live-chat-byline { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.live-chat-byline strong { color: #e2e5f2; font-size: 9px; }
+.live-chat-byline small { color: #69738a; font-size: 8px; }
+.live-chat-message p { margin: 4px 0 0; color: #b4bbcd; font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; white-space: pre-wrap; }
+.live-chat-empty { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; min-height: 90px; color: #6d7790; text-align: center; }
+.live-chat-empty p { max-width: 160px; margin: 9px 0 0; font-size: 9px; line-height: 1.7; }
+.live-chat-compose { display: flex; align-items: center; gap: 5px; padding: 5px 6px 5px 10px; border: 1px solid var(--border); border-radius: 10px; background: #141824; }
+.live-chat-compose:focus-within { border-color: #59ebc843; }
+.live-chat-compose input { flex: 1; min-width: 0; height: 29px; padding: 0; border: 0; outline: 0; color: #e9ebf6; background: transparent; font-size: 10px; }
+.live-chat-compose input::placeholder { color: #6b748a; }
+.live-chat-compose .icon-btn { width: 29px; height: 29px; color: var(--mint); }
+.live-chat-compose .icon-btn:disabled { color: #5c657b; }
+@media (max-width: 820px) {
+  .live-chat-messages { min-height: 150px; max-height: 260px; flex: 0 1 auto; }
+  .live-chat-empty { min-height: 125px; }
+}
