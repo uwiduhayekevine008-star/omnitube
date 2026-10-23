@@ -23,6 +23,23 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
 
+  media-worker-verify:
+    name: Media worker · Syntax and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: services/media-worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Validate worker syntax
+        run: npm run check
+      - name: Run media worker tests
+        run: npm test
+
   mobile-verify:
     name: Expo · TypeScript and Android export
     runs-on: ubuntu-latest
