@@ -22,11 +22,15 @@ function ShortSlide({ video, active, userId, onLike, onSave, autoPlay, hapticsEn
     let activeRequest = true;
     if (!active) { player.pause(); return () => { activeRequest = false; }; }
     setPlaybackError("");
-    void resolvePlayback(video.id).then((url) => {
+    void resolvePlayback(video.id).then((source) => {
       if (!activeRequest) return;
-      setPlayback(url);
+      setPlayback(source.url);
       setPaused(!autoPlay);
-      return player.replaceAsync({ uri: url, useCaching: !reduceDataUsage }).then(() => {
+      return player.replaceAsync({
+        uri: source.url,
+        contentType: source.type === "hls" ? "hls" : "auto",
+        useCaching: source.type !== "hls" && !reduceDataUsage,
+      }).then(() => {
         if (!activeRequest) return;
         if (autoPlay) player.play(); else player.pause();
       });
