@@ -42,7 +42,7 @@ function ShortSlide({ video, active, userId, onLike, onSave, autoPlay, hapticsEn
     let lastRecordedSecond = 0;
     const subscription = player.addListener("timeUpdate", ({ currentTime }) => {
       const second = Math.floor(currentTime);
-      if (second < 1 || second - lastRecordedSecond < 10) return;
+      if (second < 1 || (lastRecordedSecond > 0 && second - lastRecordedSecond < 10)) return;
       lastRecordedSecond = second;
       void supabase.rpc("record_video_watch", {
         p_video_id: video.id,
