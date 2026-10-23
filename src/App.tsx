@@ -3,7 +3,8 @@ import {
   ArrowDownUp, Bell, BookmarkPlus, Camera, Check, ChevronDown, CircleHelp, Clapperboard,
   Compass, Film, Flame, Heart, Home, Library, LogIn, LogOut, Menu, MessageCircle,
   Mic, MonitorPlay, MoreHorizontal, Play, Plus, Radio, Repeat2, Search, Send, Settings,
-  ShieldAlert, Sparkles, ThumbsUp, TrendingUp, Upload, Users, Video as VideoIcon, Volume2, X
+  ShieldAlert, Sparkles, ThumbsUp, TrendingUp, Upload, Users, Video as VideoIcon, Volume2, X,
+  Captions, Maximize, Minimize, PictureInPicture2, Settings2, SkipBack, SkipForward, Theater, RotateCcw
 } from "lucide-react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import * as tus from "tus-js-client";
@@ -159,7 +160,18 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
   const [src, setSrc] = useState("");
   const [playbackType, setPlaybackType] = useState<"hls" | "file">("file");
   const [loadError, setLoadError] = useState("");
+  const [playbackAttempt, setPlaybackAttempt] = useState(0);
+  const [qualityOptions, setQualityOptions] = useState<Array<{ label: string; index: number }>>([]);
+  const [selectedQuality, setSelectedQuality] = useState("auto");
+  const [captionOptions, setCaptionOptions] = useState<Array<{ label: string; index: number }>>([]);
+  const [selectedCaption, setSelectedCaption] = useState("off");
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [theaterMode, setTheaterMode] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
   const videoElement = useRef<HTMLVideoElement | null>(null);
+  const hlsInstance = useRef<Hls | null>(null);
   const [comments, setComments] = useState<any[]>([]);
   const [commentBody, setCommentBody] = useState("");
   const [commentBusy, setCommentBusy] = useState(false);
@@ -171,6 +183,10 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
     let active = true;
     setSrc("");
     setLoadError("");
+    setQualityOptions([]);
+    setCaptionOptions([]);
+    setSelectedQuality("auto");
+    setSelectedCaption("off");
     setPlaybackType("file");
     void supabase.functions.invoke("resolve-playback", { body: { videoId: video.id } }).then(({ data, error }) => {
       if (!active) return;
@@ -195,10 +211,12 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
         .then(({ data }) => { if (active) setIsLiked(data?.reaction === "like" || data?.reaction === "heart"); });
     }
     return () => { active = false; };
-  }, [video.id, userId]);
+  }, [video.id, userId, playbackAttempt]);
   useEffect(() => {
     const element = videoElement.current;
-    if (!element || !src || playbackType !== "hls") return;
+    if (!element || !src) return;
+    element.playbackRate = playbackRate;
+    if (playbackType !== "hls") return;
 
     const nativeHlsSupported = Boolean(element.canPlayType("application/vnd.apple.mpegurl"));
     const canUseNativeHls = nativeHlsSupported && ("ManagedMediaSource" in window || !Hls.isSupported());
@@ -221,10 +239,28 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
       enableWorker: true,
       lowLatencyMode: false,
       backBufferLength: 90,
+      capLevelToPlayerSize: true,
+      maxBufferLength: 60,
       manifestLoadingMaxRetry: 3,
       levelLoadingMaxRetry: 3,
       fragLoadingMaxRetry: 4,
     });
+    hlsInstance.current = hls;
+    const refreshLevels = () => setQualityOptions(
+      hls.levels.map((level, index) => ({
+        label: level.height ? `${level.height}p` : `${Math.round(level.bitrate / 1000)} kbps`,
+        index,
+      })).filter((level, index, all) => all.findIndex((item) => item.label === level.label) === index)
+    );
+    const refreshCaptions = () => setCaptionOptions(
+      hls.subtitleTracks.map((track, index) => ({
+        label: track.name || track.lang || `Subtitle ${index + 1}`,
+        index,
+      }))
+    );
+    hls.on(Hls.Events.MANIFEST_PARSED, refreshLevels);
+    hls.on(Hls.Events.LEVELS_UPDATED, refreshLevels);
+    hls.on(Hls.Events.SUBTITLE_TRACKS_UPDATED, refreshCaptions);
     hls.on(Hls.Events.ERROR, (_event, data) => {
       if (!data.fatal) return;
       if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
@@ -242,11 +278,85 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
     hls.attachMedia(element);
     return () => {
       hls.destroy();
+      if (hlsInstance.current === hls) hlsInstance.current = null;
       element.pause();
       element.removeAttribute("src");
       element.load();
     };
-  }, [src, playbackType]);
+  }, [src, playbackType, playbackRate]);
+
+  useEffect(() => {
+    const element = videoElement.current;
+    if (!element || playbackType !== "file") return;
+    const syncNativeTracks = () => {
+      const tracks = Array.from(element.textTracks)
+        .map((track, index) => ({ label: track.label || track.language || `Subtitle ${index + 1}`, index }))
+        .filter((track) => Boolean(element.textTracks[track.index]));
+      setCaptionOptions(tracks);
+      if (selectedCaption !== "off" && !tracks.some((track) => String(track.index) === selectedCaption)) {
+        setSelectedCaption("off");
+      }
+    };
+    element.addEventListener("loadedmetadata", syncNativeTracks);
+    syncNativeTracks();
+    return () => element.removeEventListener("loadedmetadata", syncNativeTracks);
+  }, [src, playbackType, selectedCaption]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) return;
+      const target = event.target as HTMLElement | null;
+      if (target && (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) || target.isContentEditable)) return;
+      const element = videoElement.current;
+      if (!element || !src) return;
+      if (event.key === " " || event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        if (element.paused) void element.play().catch(() => setLoadError("Tap play to allow playback in this browser."));
+        else element.pause();
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault(); element.currentTime = Math.max(0, element.currentTime - 10);
+      } else if (event.key === "ArrowRight") {
+        event.preventDefault(); element.currentTime = Math.min(element.duration || Infinity, element.currentTime + 10);
+      } else if (event.key.toLowerCase() === "m") {
+        element.muted = !element.muted;
+      } else if (event.key.toLowerCase() === "f") {
+        event.preventDefault();
+        if (!document.fullscreenElement) void element.requestFullscreen?.();
+        else void document.exitFullscreen?.();
+      } else if (event.key.toLowerCase() === "t") {
+        setTheaterMode((value) => !value);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [src]);
+
+  const setQuality = (value: string) => {
+    setSelectedQuality(value);
+    const hls = hlsInstance.current;
+    if (hls) hls.currentLevel = value === "auto" ? -1 : Number(value);
+  };
+
+  const setCaptions = (value: string) => {
+    setSelectedCaption(value);
+    const hls = hlsInstance.current;
+    if (hls) {
+      hls.subtitleTrack = value === "off" ? -1 : Number(value);
+      hls.subtitleDisplay = value !== "off";
+      return;
+    }
+    const tracks = videoElement.current?.textTracks;
+    if (!tracks) return;
+    Array.from(tracks).forEach((track, index) => {
+      track.mode = value !== "off" && String(index) === value ? "showing" : "disabled";
+    });
+  };
+
+  const retryPlayback = () => {
+    setLoadError("");
+    setSrc("");
+    setPlaybackAttempt((value) => value + 1);
+  };
 
   const saveWatch = useCallback(async (seconds: number) => {
     if (!userId || seconds < 1 || (lastSaved.current > 0 && seconds - lastSaved.current < 10)) return;
@@ -282,14 +392,34 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
     }
   };
   useEscape(onClose);
-  return <Modal onClose={onClose} className="player-modal">
-    <div className="player-top"><div className="mini-brand"><span className="brand-mark"><span>O</span></span><span>Now playing</span></div><button className="icon-btn" onClick={onClose} aria-label="Close player"><X /></button></div>
+  return <Modal onClose={onClose} className={"player-modal" + (theaterMode ? " player-modal-theater" : "")}>
+    <div className="player-top">
+      <div className="mini-brand"><span className="brand-mark"><span>O</span></span><span>Now playing</span><span className="player-live-state">{playbackType === "hls" ? "ADAPTIVE STREAM" : "SECURE STREAM"}</span></div>
+      <div className="player-top-actions"><button className="btn btn-quiet player-shortcut-hint" onClick={() => setTheaterMode((value) => !value)}><Theater size={15} /> {theaterMode ? "Exit theater" : "Theater mode"}</button><button className="icon-btn" onClick={onClose} aria-label="Close player"><X /></button></div>
+    </div>
     <div className="player-layout">
       <div className="player-main">
         <div className="player-frame">
-          {src ? <video ref={videoElement} src={playbackType === "file" ? src : undefined} controls autoPlay playsInline onTimeUpdate={(event) => { const sec = Math.floor(event.currentTarget.currentTime); setWatchSecond(sec); void saveWatch(sec); }} onEnded={() => void saveWatch(watchSecond)} /> :
-            <div className="player-loading">{loadError ? <><ShieldAlert size={28} /><strong>Playback unavailable</strong><p>{loadError}</p></> : <><span className="spinner" /><p>Preparing secure playback…</p></>}</div>}
+          {src ? <video ref={videoElement} src={playbackType === "file" ? src : undefined} controls autoPlay playsInline onPlay={() => setIsPlaying(true)} onPause={() => setIsPlaying(false)} onLoadedMetadata={(event) => { setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0); event.currentTarget.playbackRate = playbackRate; }} onDurationChange={(event) => setDuration(Number.isFinite(event.currentTarget.duration) ? event.currentTarget.duration : 0)} onTimeUpdate={(event) => { const sec = Math.floor(event.currentTarget.currentTime); setCurrentTime(event.currentTarget.currentTime); setWatchSecond(sec); void saveWatch(sec); }} onEnded={() => void saveWatch(watchSecond)} onError={() => setLoadError("The stream could not be decoded or the media URL expired. Retry to request a fresh secure playback URL.")} /> :
+            <div className="player-loading">{loadError ? <><ShieldAlert size={28} /><strong>Playback unavailable</strong><p>{loadError}</p><button className="btn btn-primary" onClick={retryPlayback}><RotateCcw size={15} /> Retry secure playback</button></> : <><span className="spinner" /><p>Preparing secure playback…</p></>}</div>}
+          {src && loadError && <div className="player-error-overlay" role="alert"><ShieldAlert size={24} /><strong>Playback interrupted</strong><p>{loadError}</p><button className="btn btn-primary" onClick={retryPlayback}><RotateCcw size={15} /> Retry stream</button></div>}
         </div>
+        {src && <div className="player-toolbar" aria-label="Advanced player controls">
+          <div className="player-toolbar-primary">
+            <button className="player-tool-button" onClick={() => { const element = videoElement.current; if (element) element.currentTime = Math.max(0, element.currentTime - 10); }} title="Back 10 seconds (←)" aria-label="Back 10 seconds"><SkipBack size={16} /><span>10s</span></button>
+            <button className="player-tool-button" onClick={() => { const element = videoElement.current; if (!element) return; if (element.paused) void element.play().catch(() => setLoadError("Tap play directly on the video to resume.")); else element.pause(); }} title="Play or pause (Space)" aria-label={isPlaying ? "Pause video" : "Play video"}>{isPlaying ? <Volume2 size={16} /> : <Play size={16} />}</button>
+            <button className="player-tool-button" onClick={() => { const element = videoElement.current; if (element) element.currentTime = Math.min(element.duration || Infinity, element.currentTime + 10); }} title="Forward 10 seconds (→)" aria-label="Forward 10 seconds"><SkipForward size={16} /><span>10s</span></button>
+            <div className="player-time-readout"><span>{formatDuration(currentTime)}</span><span>/</span><span>{formatDuration(duration || video.duration_seconds || 0)}</span></div>
+          </div>
+          <div className="player-toolbar-options">
+            <label className="player-select-label"><span>Speed</span><select value={playbackRate} onChange={(event) => { const rate = Number(event.target.value); setPlaybackRate(rate); if (videoElement.current) videoElement.current.playbackRate = rate; }} aria-label="Playback speed">{[0.5,0.75,1,1.25,1.5,1.75,2].map((rate) => <option key={rate} value={rate}>{rate === 1 ? "Normal" : rate + "×"}</option>)}</select></label>
+            <label className="player-select-label"><span>Quality</span><select value={selectedQuality} onChange={(event) => setQuality(event.target.value)} aria-label="Playback quality"><option value="auto">{playbackType === "hls" ? "Auto" : "Original"}</option>{qualityOptions.map((level) => <option key={level.index} value={level.index}>{level.label}</option>)}</select></label>
+            <label className="player-select-label player-caption-select"><span><Captions size={13} /> CC</span><select value={selectedCaption} onChange={(event) => setCaptions(event.target.value)} aria-label="Subtitles and captions"><option value="off">Off</option>{captionOptions.map((track) => <option key={track.index} value={track.index}>{track.label}</option>)}</select></label>
+            <button className="player-tool-button" onClick={() => { const element = videoElement.current; if (element && document.pictureInPictureEnabled && !document.pictureInPictureElement) void element.requestPictureInPicture().catch(() => notify("Picture-in-picture is unavailable on this browser.")); else if (document.pictureInPictureElement) void document.exitPictureInPicture(); }} title="Picture in picture" aria-label="Picture in picture"><PictureInPicture2 size={16} /></button>
+            <button className="player-tool-button" onClick={() => { const element = videoElement.current; if (element && !document.fullscreenElement) void element.requestFullscreen?.(); else if (document.fullscreenElement) void document.exitFullscreen?.(); }} title="Fullscreen (F)" aria-label="Toggle fullscreen"><Maximize size={16} /></button>
+          </div>
+        </div>}
+        <div className="player-keyboard-help"><span><b>Space</b> Play/pause</span><span><b>← / →</b> Seek 10s</span><span><b>M</b> Mute</span><span><b>F</b> Fullscreen</span><span><b>T</b> Theater</span></div>
         <h2 className="player-title">{video.title}</h2>
         <div className="player-info-row"><div className="creator-identity"><Avatar profile={video.creator} /><div><strong>{video.creator?.display_name || "Creator"}</strong><small>{formatCount(video.views_count)} views · {timeAgo(video.published_at || video.created_at)}</small></div></div>
           <button className={"btn " + (isLiked ? "btn-liked" : "btn-quiet")} onClick={() => void toggleLike()}><ThumbsUp size={16} /> {formatCount(likes)} <span className="btn-separator" /> Like</button>
