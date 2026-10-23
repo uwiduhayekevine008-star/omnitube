@@ -54,7 +54,7 @@ function ShortSlide({ video, active, userId, onLike, onSave }: { video: VideoRow
         <Pressable style={styles.railAction} onPress={async () => { await Haptics.selectionAsync(); setLiked((old) => !old); onLike(); }}><View style={[styles.railIcon, liked && styles.likedIcon]}><Ionicons name={liked ? "heart" : "heart-outline"} size={23} color={liked ? theme.coral : theme.text}/></View><Text style={styles.railLabel}>Like</Text></Pressable>
         <Pressable style={styles.railAction} onPress={() => router.push({ pathname: "/watch/[id]", params: { id: video.id } })}><View style={styles.railIcon}><Ionicons name="chatbubble-ellipses-outline" size={22} color={theme.text}/></View><Text style={styles.railLabel}>Discuss</Text></Pressable>
         <Pressable style={styles.railAction} onPress={onSave}><View style={styles.railIcon}><Ionicons name="bookmark-outline" size={22} color={theme.text}/></View><Text style={styles.railLabel}>Save</Text></Pressable>
-        <Pressable style={styles.railAction} onPress={() => void Share.share({ message: video.title + "\n" + "https://omnitube.app/watch/" + video.id })}><View style={styles.railIcon}><Ionicons name="arrow-redo-outline" size={22} color={theme.text}/></View><Text style={styles.railLabel}>Share</Text></Pressable>
+        <Pressable style={styles.railAction} onPress={() => void Share.share({ message: video.title + "\n" + "omnitube:///watch/" + video.id })}><View style={styles.railIcon}><Ionicons name="arrow-redo-outline" size={22} color={theme.text}/></View><Text style={styles.railLabel}>Share</Text></Pressable>
       </View>
     </View>
   </View>;
