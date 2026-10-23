@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { Room, RoomEvent, Track } from "livekit-client";
 import * as tus from "tus-js-client";
+import Hls from "hls.js";
 import { isSupabaseConfigured, storagePublicUrl, supabase, supabaseUrl, formatCount, timeAgo } from "./lib/supabase";
 
 type Section = "home" | "trending" | "shorts" | "live" | "subscriptions" | "posts" | "library" | "notifications" | "studio";
@@ -155,7 +156,9 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
   notify: (title: string, detail?: string, kind?: Notice["kind"]) => void; userId: string | null;
 }) {
   const [src, setSrc] = useState("");
+  const [playbackType, setPlaybackType] = useState<"hls" | "file">("file");
   const [loadError, setLoadError] = useState("");
+  const videoElement = useRef<HTMLVideoElement | null>(null);
   const [comments, setComments] = useState<any[]>([]);
   const [commentBody, setCommentBody] = useState("");
   const [commentBusy, setCommentBusy] = useState(false);
@@ -165,10 +168,18 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
   const lastSaved = useRef(0);
   useEffect(() => {
     let active = true;
+    setSrc("");
+    setLoadError("");
+    setPlaybackType("file");
     void supabase.functions.invoke("resolve-playback", { body: { videoId: video.id } }).then(({ data, error }) => {
       if (!active) return;
       if (error || !data?.signedUrl) setLoadError(error?.message || data?.error || "Playback could not be authorized.");
-      else setSrc(data.signedUrl as string);
+      else {
+        setPlaybackType(data.playbackType === "hls" ? "hls" : "file");
+        setSrc(data.signedUrl as string);
+      }
+    }).catch((error) => {
+      if (active) setLoadError(error instanceof Error ? error.message : "Playback could not be authorized.");
     });
     void (async () => {
       const { data } = await supabase.from("comments").select("id,body,user_id,created_at").eq("video_id", video.id).order("created_at", { ascending: false }).limit(60);
@@ -184,6 +195,59 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
     }
     return () => { active = false; };
   }, [video.id, userId]);
+  useEffect(() => {
+    const element = videoElement.current;
+    if (!element || !src || playbackType !== "hls") return;
+
+    const canUseNativeHls =
+      Boolean(element.canPlayType("application/vnd.apple.mpegurl")) &&
+      ("ManagedMediaSource" in window || /Safari/i.test(navigator.userAgent));
+    if (canUseNativeHls) {
+      element.src = src;
+      element.load();
+      return () => {
+        element.pause();
+        element.removeAttribute("src");
+        element.load();
+      };
+    }
+
+    if (!Hls.isSupported()) {
+      setLoadError("This browser does not support adaptive HLS playback. Update your browser or try a supported device.");
+      return;
+    }
+
+    const hls = new Hls({
+      enableWorker: true,
+      lowLatencyMode: false,
+      backBufferLength: 90,
+      manifestLoadingMaxRetry: 3,
+      levelLoadingMaxRetry: 3,
+      fragLoadingMaxRetry: 4,
+    });
+    hls.on(Hls.Events.ERROR, (_event, data) => {
+      if (!data.fatal) return;
+      if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+        hls.startLoad();
+        return;
+      }
+      if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+        hls.recoverMediaError();
+        return;
+      }
+      setLoadError("Adaptive playback stopped unexpectedly. Close and reopen the video to retry.");
+      hls.destroy();
+    });
+    hls.loadSource(src);
+    hls.attachMedia(element);
+    return () => {
+      hls.destroy();
+      element.pause();
+      element.removeAttribute("src");
+      element.load();
+    };
+  }, [src, playbackType]);
+
   const saveWatch = useCallback(async (seconds: number) => {
     if (!userId || seconds < 1 || seconds - lastSaved.current < 10) return;
     lastSaved.current = seconds;
@@ -223,7 +287,7 @@ function VideoPlayer({ video, profile, onClose, notify, userId }: {
     <div className="player-layout">
       <div className="player-main">
         <div className="player-frame">
-          {src ? <video src={src} controls autoPlay playsInline onTimeUpdate={(event) => { const sec = Math.floor(event.currentTarget.currentTime); setWatchSecond(sec); void saveWatch(sec); }} onEnded={() => void saveWatch(watchSecond)} /> :
+          {src ? <video ref={videoElement} src={playbackType === "file" ? src : undefined} controls autoPlay playsInline onTimeUpdate={(event) => { const sec = Math.floor(event.currentTarget.currentTime); setWatchSecond(sec); void saveWatch(sec); }} onEnded={() => void saveWatch(watchSecond)} /> :
             <div className="player-loading">{loadError ? <><ShieldAlert size={28} /><strong>Playback unavailable</strong><p>{loadError}</p></> : <><span className="spinner" /><p>Preparing secure playback…</p></>}</div>}
         </div>
         <h2 className="player-title">{video.title}</h2>
