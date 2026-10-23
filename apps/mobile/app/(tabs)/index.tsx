@@ -11,7 +11,7 @@ import type { LiveStreamRow, VideoRow } from "../../src/lib/types";
 import { theme } from "../../src/theme";
 
 const topics = ["For you", "Technology", "Music", "Education", "Gaming", "Science", "Comedy", "Lifestyle"];
-const chips = ["Newest", "Trending", "Videos", "Shorts"];
+const chips = ["For you", "Newest", "Trending", "Videos", "Shorts", "Following"];
 
 export default function DiscoverScreen() {
   const { user, profile } = useAuth();
@@ -22,19 +22,22 @@ export default function DiscoverScreen() {
   const [error, setError] = useState("");
   const [query, setQuery] = useState("");
   const [topic, setTopic] = useState("For you");
-  const [feed, setFeed] = useState("Newest");
+  const [feed, setFeed] = useState("For you");
   const [hasMore, setHasMore] = useState(true);
   const pageRef = useRef(0);
+  const loadingMoreRef = useRef(false);
 
-  const load = useCallback(async (reset = true) => {
+  const load = useCallback(async (reset = true, pullRefresh = false) => {
     if (!isConfigured) {
       setLoading(false);
       setError("Set the EXPO_PUBLIC Supabase values in apps/mobile/.env.local first.");
       return;
     }
+    if (!reset && loadingMoreRef.current) return;
+    if (!reset) loadingMoreRef.current = true;
     const nextPage = reset ? 0 : pageRef.current;
-    if (reset) { setLoading(true); setHasMore(true); pageRef.current = 0; }
-    else setRefreshing(true);
+    if (reset) { setLoading(!pullRefresh); setHasMore(true); pageRef.current = 0; }
+    setRefreshing(pullRefresh);
     try {
       let request = supabase.from("videos")
         .select("id,creator_id,title,description,video_path,thumbnail_path,duration_seconds,visibility,kind,status,category,tags,allow_comments,views_count,published_at,created_at,updated_at")
@@ -42,21 +45,87 @@ export default function DiscoverScreen() {
       if (feed === "Shorts") request = request.eq("kind", "short") as typeof request;
       if (feed === "Videos") request = request.eq("kind", "video") as typeof request;
       if (topic !== "For you") request = request.eq("category", topic) as typeof request;
-      const q = query.trim().replace(/[,%()]/g, " ").replace(/\s+/g, " ").slice(0, 90);
+      const q = query.trim().replace(/[,%()]/g, " ").replace(/\\s+/g, " ").slice(0, 90);
       if (q) request = request.or("title.ilike.%" + q + "%,description.ilike.%" + q + "%") as typeof request;
+
+      if (feed === "Following") {
+        if (!user?.id) {
+          setVideos([]);
+          setHasMore(false);
+          setError("Sign in to build a feed from the creators you follow.");
+          return;
+        }
+        const { data: follows, error: followsError } = await supabase.from("follows").select("creator_id").eq("follower_id", user.id);
+        if (followsError) throw followsError;
+        const followedIds = (follows || []).map((item) => item.creator_id);
+        if (!followedIds.length) {
+          setVideos([]);
+          setHasMore(false);
+          setError("");
+          return;
+        }
+        request = request.in("creator_id", followedIds) as typeof request;
+      }
+
+      const personalized = feed === "For you";
       if (feed === "Trending") request = request.order("views_count", { ascending: false }).order("published_at", { ascending: false }) as typeof request;
       else request = request.order("published_at", { ascending: false }) as typeof request;
-      const { data, error: queryError } = await request.range(nextPage * 18, nextPage * 18 + 17);
+      const { data, error: queryError } = await request.range(personalized ? 0 : nextPage * 18, personalized ? 71 : nextPage * 18 + 17);
       if (queryError) throw queryError;
-      const hydrated = await hydrateVideos((data || []) as unknown as VideoRow[]);
-      setVideos((old) => reset ? hydrated : [...old, ...hydrated]);
-      setHasMore((data || []).length === 18);
+      let rows = (data || []) as unknown as VideoRow[];
+
+      if (personalized && user?.id && rows.length) {
+        const [follows, recentViews, reactions] = await Promise.all([
+          supabase.from("follows").select("creator_id").eq("follower_id", user.id),
+          supabase.from("video_views").select("video_id,created_at").eq("viewer_id", user.id).order("created_at", { ascending: false }).limit(60),
+          supabase.from("video_reactions").select("video_id").eq("user_id", user.id),
+        ]);
+        const followed = new Set((follows.data || []).map((item) => item.creator_id));
+        const watched = new Set((recentViews.data || []).map((item) => item.video_id));
+        const liked = new Set((reactions.data || []).map((item) => item.video_id));
+        const categoryIds = Array.from(watched).slice(0, 25);
+        const watchedCategories = categoryIds.length
+          ? await supabase.from("videos").select("id,category").in("id", categoryIds)
+          : { data: [] as { id: string; category: string }[] };
+        const categoryAffinity = new Map<string, number>();
+        (watchedCategories.data || []).forEach((item) => categoryAffinity.set(item.category, (categoryAffinity.get(item.category) || 0) + 1));
+        const now = Date.now();
+        rows = [...rows].sort((a, b) => {
+          const score = (video: VideoRow) => {
+            const ageDays = Math.max(0, (now - new Date(video.published_at || video.created_at).getTime()) / 86400000);
+            const freshness = Math.exp(-ageDays / 8);
+            const popularity = Math.log1p(Number(video.views_count || 0)) / 5;
+            const creatorAffinity = followed.has(video.creator_id) ? 2.4 : 0;
+            const category = (categoryAffinity.get(video.category) || 0) * 0.12;
+            const unseen = watched.has(video.id) ? -0.65 : 0.3;
+            const likedPenalty = liked.has(video.id) ? -0.5 : 0.15;
+            return freshness + popularity + creatorAffinity + category + unseen + likedPenalty;
+          };
+          return score(b) - score(a);
+        });
+      }
+
+      if (personalized) {
+        const start = nextPage * 18;
+        const pageRows = rows.slice(start, start + 18);
+        const hydrated = await hydrateVideos(pageRows);
+        setVideos((old) => reset ? hydrated : [...old, ...hydrated]);
+        setHasMore(rows.length > start + 18);
+      } else {
+        const hydrated = await hydrateVideos(rows);
+        setVideos((old) => reset ? hydrated : [...old, ...hydrated]);
+        setHasMore(rows.length === 18);
+      }
       pageRef.current = nextPage + 1;
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "The feed could not be loaded.");
-    } finally { setLoading(false); setRefreshing(false); }
-  }, [feed, topic, query]);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+      loadingMoreRef.current = false;
+    }
+  }, [feed, topic, query, user?.id]);
 
   useEffect(() => { void load(true); }, [load]);
   useEffect(() => {
