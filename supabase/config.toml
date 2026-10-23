@@ -8,3 +8,6 @@ verify_jwt = true
 
 [functions.livekit-token]
 verify_jwt = true
+
+[functions.delete-video]
+verify_jwt = true
