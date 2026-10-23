@@ -2,6 +2,7 @@ import * as Linking from "expo-linking";
 import type { Session, User } from "@supabase/supabase-js";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { supabase } from "./supabase";
+import { registerDevicePushToken, unregisterDevicePushToken } from "./pushNotifications";
 import type { Profile } from "./types";
 
 type AuthState = {
@@ -38,6 +39,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    const userId = session?.user?.id;
+    if (!userId) return;
+    let active = true;
+    void registerDevicePushToken(userId).catch((error) => {
+      // Push is an optional capability until the app is linked to EAS and the user grants permission.
+      if (active && __DEV__) console.warn("OmniTube push registration unavailable:", error);
+    });
+    return () => { active = false; };
+  }, [session?.user?.id]);
+
   const refreshProfile = useCallback(async () => {
     const current = session?.user;
     if (!current) { setProfile(null); return; }
@@ -67,6 +79,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signOut = useCallback(async () => {
+    if (session?.user?.id) {
+      try { await unregisterDevicePushToken(session.user.id); } catch { /* Sign-out must still succeed if push cleanup is offline. */ }
+    }
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
     setProfile(null);
