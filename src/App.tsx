@@ -19,6 +19,7 @@ type VideoRow = {
 };
 type PostRow = { id: string; creator_id: string; body: string; media_urls: string[]; visibility: string; created_at: string; creator?: Profile; likes?: number };
 type StreamRow = { id: string; creator_id: string; title: string; description: string; status: string; visibility: string; room_name: string; starts_at: string; creator?: Profile };
+type StreamMessage = { id: string; stream_id: string; user_id: string; body: string; created_at: string; author?: Profile | null };
 type Notice = { id: string; title: string; detail?: string; kind?: "success" | "error" | "info" };
 
 const NAV: { id: Section; label: string; icon: typeof Home }[] = [
@@ -317,17 +318,44 @@ function UploadDialog({ userId, notify, onClose, onPublished }: {
   </Modal>;
 }
 
-function LiveRoomPane({ stream, token, serverUrl, broadcaster, onClose, notify }: {
-  stream: StreamRow; token: string; serverUrl: string; broadcaster: boolean;
+function LiveRoomPane({ stream, token, serverUrl, broadcaster, userId, profile, onClose, notify }: {
+  stream: StreamRow; token: string; serverUrl: string; broadcaster: boolean; userId: string; profile: Profile | null;
   onClose: () => void; notify: (title: string, detail?: string, kind?: Notice["kind"]) => void;
 }) {
   const roomRef = useRef<Room | null>(null);
   const mediaRef = useRef<HTMLDivElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
   const [connected, setConnected] = useState(false);
   const [micOn, setMicOn] = useState(broadcaster);
   const [cameraOn, setCameraOn] = useState(broadcaster);
   const [busy, setBusy] = useState(true);
+  const [chatMessages, setChatMessages] = useState<StreamMessage[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatSending, setChatSending] = useState(false);
   useEffect(() => {
+    let chatActive = true;
+    const loadChat = async () => {
+      const { data, error } = await supabase.from("stream_messages")
+        .select("id,stream_id,user_id,body,created_at")
+        .eq("stream_id", stream.id).order("created_at", { ascending: false }).limit(100);
+      if (!chatActive || error || !data) return;
+      const rows = [...data].reverse() as StreamMessage[];
+      const ids = Array.from(new Set(rows.map((row) => row.user_id)));
+      const people = ids.length
+        ? await supabase.from("profiles").select("id,username,display_name,avatar_url,bio,is_verified").in("id", ids)
+        : { data: [] as Profile[] };
+      const profiles = new Map((people.data || []).map((person) => [person.id, person]));
+      if (chatActive) setChatMessages(rows.map((row) => ({ ...row, author: profiles.get(row.user_id) || null })));
+    };
+    void loadChat();
+    const chatChannel = supabase.channel("omnitube-live-chat-" + stream.id)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "stream_messages", filter: "stream_id=eq." + stream.id }, async (event) => {
+        const row = event.new as StreamMessage;
+        const { data: author } = await supabase.from("profiles")
+          .select("id,username,display_name,avatar_url,bio,is_verified").eq("id", row.user_id).maybeSingle();
+        if (chatActive) setChatMessages((old) => old.some((item) => item.id === row.id)
+          ? old : [...old, { ...row, author: author as Profile | null }].slice(-100));
+      }).subscribe();
     const room = new Room({ adaptiveStream: true, dynacast: true });
     roomRef.current = room;
     const mount = (track: Track) => {
@@ -347,8 +375,32 @@ function LiveRoomPane({ stream, token, serverUrl, broadcaster, onClose, notify }
       setConnected(true);
     }).catch((error: unknown) => notify("Could not connect to live media", error instanceof Error ? error.message : String(error), "error"))
       .finally(() => setBusy(false));
-    return () => { room.removeAllListeners(); void room.disconnect(); };
-  }, [serverUrl, token, broadcaster, notify]);
+    return () => {
+      chatActive = false;
+      void supabase.removeChannel(chatChannel);
+      room.removeAllListeners();
+      void room.disconnect();
+    };
+  }, [serverUrl, token, broadcaster, notify, stream.id]);
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [chatMessages.length]);
+  const sendChatMessage = async (event: FormEvent) => {
+    event.preventDefault();
+    const body = chatInput.trim();
+    if (!body || chatSending || !userId) return;
+    setChatSending(true);
+    const { data, error } = await supabase.from("stream_messages")
+      .insert({ stream_id: stream.id, user_id: userId, body })
+      .select("id,stream_id,user_id,body,created_at").single();
+    setChatSending(false);
+    if (error) notify("Message not sent", error.message, "error");
+    else if (data) {
+      setChatMessages((old) => old.some((item) => item.id === data.id)
+        ? old : [...old, { ...data, author: profile }].slice(-100));
+      setChatInput("");
+    }
+  };
   const leave = async () => {
     await roomRef.current?.disconnect();
     onClose();
@@ -357,7 +409,21 @@ function LiveRoomPane({ stream, token, serverUrl, broadcaster, onClose, notify }
     <div className="live-room-top"><div className="live-status"><span className={connected ? "live-dot" : "live-dot muted-dot"} />{connected ? "CONNECTED TO LIVE" : "CONNECTING"}<span className="live-viewer-title">{stream.title}</span></div><button className="icon-btn" onClick={() => void leave()} aria-label="Leave stream"><X /></button></div>
     <div className="live-stage">
       <div className="live-video-stage" ref={mediaRef}>{busy && <div className="room-placeholder"><span className="spinner" /><p>Connecting securely to LiveKit…</p></div>}{!busy && !connected && <div className="room-placeholder"><Radio size={30} /><p>Could not connect. Check the live provider and stream configuration.</p></div>}</div>
-      <aside className="live-side-panel"><div className="live-chat-heading"><Radio size={17} /><strong>Live room</strong></div><div className="live-chat-note">Realtime audio, video and chat are delivered by LiveKit. Room access is issued by the server for this stream.</div><div className="live-room-tools">{broadcaster && <><button className={"btn " + (micOn ? "btn-quiet" : "btn-danger")} onClick={async () => { const next = !micOn; await roomRef.current?.localParticipant.setMicrophoneEnabled(next); setMicOn(next); }}><Mic size={16} /> {micOn ? "Mute mic" : "Unmute mic"}</button><button className={"btn " + (cameraOn ? "btn-quiet" : "btn-danger")} onClick={async () => { const next = !cameraOn; await roomRef.current?.localParticipant.setCameraEnabled(next); setCameraOn(next); }}><Camera size={16} /> {cameraOn ? "Camera off" : "Camera on"}</button></>}
+      <aside className="live-side-panel">
+        <div className="live-chat-heading"><Radio size={17} /><strong>Live chat</strong><span>{chatMessages.length}</span></div>
+        <div className="live-chat-messages" aria-live="polite">
+          {chatMessages.map((message) => <article className="live-chat-message" key={message.id}>
+            <Avatar profile={message.author || (message.user_id === userId ? profile : null)} size="sm" />
+            <div><div className="live-chat-byline"><strong>{message.author?.display_name || (message.user_id === userId ? profile?.display_name : null) || "Creator"}</strong><small>{timeAgo(message.created_at)}</small></div><p>{message.body}</p></div>
+          </article>)}
+          {chatMessages.length === 0 && <div className="live-chat-empty"><MessageCircle size={19} /><p>The room is open. Start the conversation.</p></div>}
+          <div ref={chatEndRef} />
+        </div>
+        <form className="live-chat-compose" onSubmit={(event) => void sendChatMessage(event)}>
+          <input value={chatInput} onChange={(event) => setChatInput(event.target.value)} maxLength={1000} placeholder={stream.status === "live" ? "Message the live room…" : "Chat is unavailable"} aria-label="Live chat message" />
+          <button className="icon-btn" type="submit" disabled={chatSending || !chatInput.trim() || stream.status !== "live"} aria-label="Send live chat message"><Send size={15} /></button>
+        </form>
+        <div className="live-room-tools">{broadcaster && <><button className={"btn " + (micOn ? "btn-quiet" : "btn-danger")} onClick={async () => { const next = !micOn; await roomRef.current?.localParticipant.setMicrophoneEnabled(next); setMicOn(next); }}><Mic size={16} /> {micOn ? "Mute mic" : "Unmute mic"}</button><button className={"btn " + (cameraOn ? "btn-quiet" : "btn-danger")} onClick={async () => { const next = !cameraOn; await roomRef.current?.localParticipant.setCameraEnabled(next); setCameraOn(next); }}><Camera size={16} /> {cameraOn ? "Camera off" : "Camera on"}</button></>}
         <button className="btn btn-danger full" onClick={() => void leave()}>{broadcaster ? "End broadcast" : "Leave stream"}</button></div></aside>
     </div>
   </Modal>;
@@ -698,7 +764,7 @@ function App() {
     {uploadOpen && user?.id && <UploadDialog userId={user.id} notify={notify} onClose={() => setUploadOpen(false)} onPublished={() => { void loadVideos(); if (section === "studio") void loadVideos(); }} />}
     {selectedVideo && <VideoPlayer key={selectedVideo.id} video={selectedVideo} profile={profile} onClose={() => setSelectedVideo(null)} notify={notify} userId={user?.id || null} />}
     {liveSetup && <Modal onClose={() => { if (!uploadBusy) setLiveSetup(false); }} className="live-setup-modal"><div className="modal-heading"><div><p className="eyebrow">ON-AIR STUDIO</p><h2>Start a live broadcast.</h2><p className="muted">An authorized LiveKit room will be created for your creator identity.</p></div><button className="icon-btn" onClick={() => setLiveSetup(false)}><X /></button></div><form className="stack-form" onSubmit={(event) => void publishLive(event)}><label htmlFor="stream-title">Stream title</label><input id="stream-title" value={liveTitle} onChange={(event) => setLiveTitle(event.target.value)} required maxLength={180} placeholder="What are we getting into today?" /><label htmlFor="stream-description">Description</label><textarea id="stream-description" value={liveDescription} onChange={(event) => setLiveDescription(event.target.value)} rows={3} maxLength={3000} placeholder="Tell viewers what this live session is about." /><div className="provider-info"><Radio size={17} /><div><strong>LiveKit realtime media</strong><span>Requires VITE_LIVEKIT_URL and server-only LIVEKIT_API_KEY / LIVEKIT_API_SECRET in Supabase Edge Function secrets.</span></div></div><div className="modal-footer"><button type="button" className="btn btn-quiet" onClick={() => setLiveSetup(false)} disabled={uploadBusy}>Cancel</button><button type="submit" className="btn btn-primary" disabled={uploadBusy || !liveTitle.trim()}>{uploadBusy ? <><span className="spinner" /> Starting…</> : <><Radio size={16} /> Start broadcast</>}</button></div></form></Modal>}
-    {room && livekitUrl && <LiveRoomPane key={room.stream.id} stream={room.stream} token={room.token} serverUrl={livekitUrl} broadcaster={room.broadcaster} onClose={() => void endRoom()} notify={notify} />}
+    {room && livekitUrl && <LiveRoomPane key={room.stream.id} stream={room.stream} token={room.token} serverUrl={livekitUrl} broadcaster={room.broadcaster} userId={user?.id || ""} profile={profile} onClose={() => void endRoom()} notify={notify} />}
     {notice && <div className={"toast toast-" + (notice.kind || "info")} role="status"><span className="toast-icon">{notice.kind === "success" ? <Check size={17} /> : notice.kind === "error" ? <ShieldAlert size={17} /> : <Sparkles size={17} />}</span><div><strong>{notice.title}</strong>{notice.detail && <p>{notice.detail}</p>}</div><button className="icon-btn tiny" onClick={() => setNotice(null)} aria-label="Dismiss notification"><X size={16} /></button></div>}
   </div>;
 }
