@@ -182,10 +182,63 @@ async function listLocalFiles(directory) {
   return result;
 }
 
-async function uploadRenditions(admin, basePath, outputFolder) {
+async function assertJobLease(admin, job) {
+  const { data: current, error } = await admin.from("media_processing_jobs")
+    .select("id,status,locked_by").eq("id", job.id).maybeSingle();
+  if (error) throw new Error("Could not verify media-worker job lease");
+  if (!current || current.status !== "processing" || current.locked_by !== workerId) {
+    throw new MediaJobCancelledError("The media-processing lease was cancelled or reassigned");
+  }
+  const { data: video, error: videoError } = await admin.from("videos")
+    .select("status").eq("id", job.video_id).maybeSingle();
+  if (videoError) throw new Error("Could not verify video state before media processing");
+  if (!video || video.status !== "published") {
+    throw new MediaJobCancelledError("The video was removed or unpublished during processing");
+  }
+}
+
+async function listStorageObjects(admin, bucket, root) {
+  const pending = [root];
+  const found = [];
+  while (pending.length) {
+    const folder = pending.pop();
+    let offset = 0;
+    while (true) {
+      const { data, error } = await admin.storage.from(bucket).list(folder, {
+        limit: 100, offset, sortBy: { column: "name", order: "asc" },
+      });
+      if (error) throw new Error(`Could not enumerate storage cleanup folder ${folder}`);
+      const items = data || [];
+      for (const item of items) {
+        const path = folder + "/" + item.name;
+        if (item.id == null && item.metadata == null) pending.push(path);
+        else found.push(path);
+        if (found.length > 50000) throw new Error("Media cleanup exceeded the safe object-count limit");
+      }
+      if (items.length < 100) break;
+      offset += items.length;
+    }
+  }
+  return found;
+}
+
+async function cleanupRenditionPrefix(admin, root) {
+  if (!root) return;
+  const paths = await listStorageObjects(admin, RENDITION_BUCKET, root);
+  for (let offset = 0; offset < paths.length; offset += 100) {
+    const { error } = await admin.storage.from(RENDITION_BUCKET).remove(paths.slice(offset, offset + 100));
+    if (error) throw new Error("Some cancelled HLS objects could not be removed");
+  }
+}
+
+class MediaJobCancelledError extends Error {}
+
+async function uploadRenditions(admin, basePath, outputFolder, job) {
   const files = await listLocalFiles(outputFolder);
-  // Sequential uploads keep memory and storage pressure bounded on a single worker.
+  // Sequential uploads bound memory. Check the lease both before and after every
+  // object write; if deletion races an upload, remove that just-written object.
   for (const filePath of files) {
+    await assertJobLease(admin, job);
     const suffix = relative(outputFolder, filePath).split(sep).join("/");
     const objectPath = `${basePath}/${suffix}`;
     const bytes = await readFile(filePath);
@@ -195,6 +248,12 @@ async function uploadRenditions(admin, basePath, outputFolder) {
       upsert: true,
     });
     if (error) throw new Error(`Rendition upload failed for ${suffix}: ${error.message}`);
+    try {
+      await assertJobLease(admin, job);
+    } catch (error) {
+      await admin.storage.from(RENDITION_BUCKET).remove([objectPath]);
+      throw error;
+    }
   }
 }
 
@@ -233,6 +292,8 @@ async function processVideo(admin, job) {
     throw new Error("Original source path is invalid");
   }
 
+  job.renditionRoot = `${video.creator_id}/${video.id}/${job.id}`;
+  await assertJobLease(admin, job);
   const temp = await mkdtemp(join(tempRoot, "job-"));
   try {
     const sourcePath = join(temp, "source.media");
@@ -246,13 +307,16 @@ async function processVideo(admin, job) {
     if (Math.min(source.width, source.height) >= 900) labels.push(1080);
     const variants = [];
     for (const label of labels) {
+      await assertJobLease(admin, job);
       variants.push(await transcodeRendition(sourcePath, join(outputFolder, `${label}p`), source, label));
     }
     await BunlessWriteFile(join(outputFolder, "master.m3u8"), buildMasterPlaylist(variants));
 
-    const basePath = `${video.creator_id}/${video.id}/${job.id}`;
-    await uploadRenditions(admin, basePath, outputFolder);
+    const basePath = job.renditionRoot;
+    await uploadRenditions(admin, basePath, outputFolder, job);
+    await assertJobLease(admin, job);
 
+    await assertJobLease(admin, job);
     let posterPath = video.thumbnail_path;
     if (!posterPath) {
       const posterLocal = join(temp, "poster.jpg");
@@ -269,14 +333,16 @@ async function processVideo(admin, job) {
       }
     }
 
-    const { error: finalizeError } = await admin.from("videos").update({
+    await assertJobLease(admin, job);
+    const { data: finalized, error: finalizeError } = await admin.from("videos").update({
       playback_manifest_path: `${basePath}/master.m3u8`,
       media_status: "ready",
       ...(posterPath ? { thumbnail_path: posterPath } : {}),
       duration_seconds: Math.round(source.duration * 100) / 100,
       updated_at: new Date().toISOString(),
-    }).eq("id", video.id).eq("status", "published");
+    }).eq("id", video.id).eq("status", "published").select("id").maybeSingle();
     if (finalizeError) throw new Error("Could not activate generated media renditions");
+    if (!finalized) throw new MediaJobCancelledError("Video was deleted before rendition activation");
 
     const { error: jobError } = await admin.from("media_processing_jobs").update({
       status: "succeeded", locked_at: null, locked_by: null, last_error: "", updated_at: new Date().toISOString(),
@@ -395,7 +461,19 @@ export async function runWorker() {
       try {
         await processVideo(admin, job);
       } catch (error) {
-        await handleFailure(admin, job, error);
+        if (error instanceof MediaJobCancelledError) {
+          try {
+            await cleanupRenditionPrefix(admin, job.renditionRoot);
+            log("info", "transcode_cancelled", { jobId: job.id, videoId: job.video_id, reason: error.message });
+          } catch (cleanupError) {
+            log("error", "cancelled_rendition_cleanup_failed", {
+              jobId: job.id, videoId: job.video_id,
+              error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+            });
+          }
+        } else {
+          await handleFailure(admin, job, error);
+        }
       } finally {
         clearInterval(heartbeatTimer);
       }
