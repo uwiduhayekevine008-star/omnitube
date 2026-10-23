@@ -4,18 +4,23 @@ const respond = (status: number, payload: Record<string, unknown>) => new Respon
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (request.method !== "POST") return respond(405, { error: "POST required" });
-  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
-  const privilegedKey = Deno.env.get(["SUPABASE", "SERVICE", "ROLE", "KEY"].join("_")) || "";
-  if (!supabaseUrl || !privilegedKey) return respond(503, { error: "Publishing service is not configured" });
-  const bearer = (request.headers.get("Authorization") || "").replace(/^Bearer\\s+/i, "");
+  const url = Deno.env.get("SUPABASE_URL") || "";
+  const anonKey = Deno.env.get(["SUPABASE", "ANON", "KEY"].join("_")) || "";
+  if (!url || !anonKey) return respond(503, { error: "Publishing service is not configured" });
+  const authorization = request.headers.get("Authorization") || "";
+  const bearer = authorization.replace(/^Bearer\\s+/i, "");
   if (!bearer || bearer.startsWith("sb_publishable_")) return respond(401, { error: "Sign-in is required" });
-  const admin = createClient(supabaseUrl, privilegedKey, { auth: { autoRefreshToken: false, persistSession: false } });
-  const { data: auth, error: authError } = await admin.auth.getUser(bearer);
-  if (authError || !auth.user) return respond(401, { error: "Your session is not valid; sign in again" });
   let input: { videoId?: unknown };
   try { input = await request.json(); } catch { return respond(400, { error: "A valid JSON body is required" }); }
   if (typeof input.videoId !== "string" || !/^[0-9a-f-]{36}$/i.test(input.videoId)) return respond(400, { error: "A valid videoId is required" });
-  const { data: video, error } = await admin.from("videos").select("id,creator_id,video_path,status").eq("id", input.videoId).eq("creator_id", auth.user.id).maybeSingle();
+  const userClient = createClient(url, anonKey, {
+    global: { headers: { Authorization: authorization } },
+    auth: { persistSession: false, autoRefreshToken: false }
+  });
+  const { data: auth, error: authError } = await userClient.auth.getUser(bearer);
+  if (authError || !auth.user) return respond(401, { error: "Your session is not valid; sign in again" });
+  const { data: video, error } = await userClient.from("videos")
+    .select("id,creator_id,video_path,status").eq("id", input.videoId).eq("creator_id", auth.user.id).maybeSingle();
   if (error) return respond(500, { error: "Could not load upload record" });
   if (!video) return respond(404, { error: "Upload was not found in your account" });
   if (video.status === "published") return respond(200, { success: true, videoId: video.id });
@@ -24,16 +29,13 @@ Deno.serve(async (request: Request) => {
   const slash = video.video_path.lastIndexOf("/");
   const folder = video.video_path.slice(0, slash);
   const filename = video.video_path.slice(slash + 1);
-  const { data: objects, error: listError } = await admin.storage.from("omnitube-videos").list(folder, { search: filename, limit: 50 });
+  const { data: objects, error: listError } = await userClient.storage.from("omnitube-videos").list(folder, { search: filename, limit: 50 });
   if (listError) return respond(503, { error: "Could not verify the uploaded media object" });
-  const object = (objects || []).find((item) => item.name === filename);
-  if (!object) return respond(422, { error: "Video upload is incomplete; finish uploading before publishing" });
-  const mediaType = String(object.metadata?.mimetype || "");
-  if (!["video/mp4", "video/webm", "video/quicktime", "video/x-matroska"].includes(mediaType)) return respond(415, { error: "Uploaded file is not a supported video format" });
-  const size = Number(object.metadata?.size || 0);
-  if (size <= 0 || size > 2 * 1024 * 1024 * 1024) return respond(413, { error: "Uploaded video is empty or exceeds the 2 GB limit" });
+  if (!(objects || []).some((object) => object.name === filename)) return respond(422, { error: "Video upload is incomplete; finish uploading before publishing" });
   const now = new Date().toISOString();
-  const { error: publishError } = await admin.from("videos").update({ status: "published", published_at: now, updated_at: now }).eq("id", video.id).eq("creator_id", auth.user.id);
-  if (publishError) return respond(500, { error: "The upload was verified but could not be published" });
+  const { error: publishError } = await userClient.from("videos").update({
+    status: "published", published_at: now, updated_at: now
+  }).eq("id", video.id).eq("creator_id", auth.user.id);
+  if (publishError) return respond(422, { error: "The upload could not be published. Confirm that the uploaded video object is complete and valid." });
   return respond(200, { success: true, videoId: video.id, publishedAt: now });
 });
