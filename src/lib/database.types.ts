@@ -647,7 +647,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      record_video_watch: {
+        Args: {
+          p_source?: string
+          p_video_id: string
+          p_watch_seconds: number
+        }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
