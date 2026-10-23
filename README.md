@@ -149,7 +149,7 @@ Enable email OTP / magic-link sign-in in Supabase Auth. Set the Auth Site URL to
 
  Set the Auth Site URL to your deployed site and allow your local development origin (normally \`http://localhost:5173\`) under redirect URLs. Configure sender/SMTP and rate limits appropriate for your audience. Verify the email link flow after setting up your domain.
 
-## 5. Production-readiness checklist
+## 6. Production-readiness checklist
 
 Before launch, complete and verify these environment-dependent operations:
 
@@ -179,7 +179,8 @@ This is a real working foundation, not a claim that external streaming, transcod
 - Magic-link sign-in and automatically created creator profile.
 - Real discovery and trending feeds, title/description search, vertical Shorts selection, and following feed.
 - Video upload form with direct TUS/resumable upload and upload progress, category, visibility, duration metadata, and optional custom thumbnail.
-- Private media playback via short-lived signed URLs.
+- Private media playback via short-lived signed URLs, owner/visibility revalidation, and private adaptive HLS renditions with original-file fallback while transcoding is pending.
+- Adaptive media worker (FFmpeg/ffprobe) with bounded profile selection, duration/size validation, retryable jobs, worker leases, structured logs, and idempotent media cleanup.
 - Likes, creator follows, reposts, threaded-ready comments, views/watch history, Watch later playlists, community text posts, notification records, reporting schema, and channel-membership data model.
 - Live rooms with LiveKit token issuance, camera/microphone controls, and a scheduled/live room data model.
 - Responsive accessible UI, loading states, no-content states, errors surfaced to the user, and build verification.
