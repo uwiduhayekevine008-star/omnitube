@@ -42,14 +42,23 @@ export default function LiveScreen() {
     const id = Crypto.randomUUID();
     const { data: created, error } = await supabase.from("live_streams").insert({
       id, creator_id: user.id, title: title.trim(), description: description.trim(),
-      status: "live", visibility: "public", provider: "livekit", room_name: "omnitube-" + id,
+      status: "scheduled", visibility: "public", provider: "livekit", room_name: "omnitube-" + id,
     }).select("*").single();
     if (error || !created) { setStarting(false); Alert.alert("Could not create stream", error?.message || "The room was not created."); return; }
     const { data, error: tokenError } = await supabase.functions.invoke("livekit-token", { body: { streamId: id, role: "publisher" } });
-    setStarting(false);
     if (tokenError || !data?.token) {
+      setStarting(false);
       await supabase.from("live_streams").update({ status: "cancelled", ended_at: new Date().toISOString() }).eq("id", id).eq("creator_id", user.id);
       Alert.alert("Broadcast authorization failed", tokenError?.message || data?.error || "Check the LiveKit secrets in Supabase.");
+      return;
+    }
+    const { error: startError } = await supabase.from("live_streams")
+      .update({ status: "live", starts_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq("id", id).eq("creator_id", user.id);
+    setStarting(false);
+    if (startError) {
+      await supabase.from("live_streams").update({ status: "cancelled", ended_at: new Date().toISOString() }).eq("id", id).eq("creator_id", user.id);
+      Alert.alert("Broadcast could not start", startError.message);
       return;
     }
     setShowSetup(false); setTitle(""); setDescription("");
